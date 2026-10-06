@@ -91,15 +91,6 @@ There is no settings menu yet. The port uses these defaults:
 | Cutscene borders | Off |
 | Camera | Free camera on the right stick |
 
-# Known limitations
-
-* **No mods yet.** `.nrm` mods are compiled at runtime by the PC version; that needs executable
-  memory and code patching on Horizon, which is work in progress.
-* **No in-game settings menu** (the PC menus are drawn by RT64).
-* **No RT64-only features:** 60 fps frame interpolation, HD texture packs, MSAA.
-* **Widescreen pop-in:** the game decides what to draw for a 4:3 view, so objects can appear late
-  at the left and right edges. The PC version does the same.
-
 # Troubleshooting
 
 * **"No valid Donkey Kong 64 ROM found"**: the ROM must be in `sdmc:/switch/dk64recomp/` and be the USA version (hash above).
