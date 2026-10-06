@@ -1,122 +1,182 @@
-# Donkey Kong 64: Recompiled
+# DK64: Recompiled for Nintendo Switch
+*Homebrew port of [Donkey Kong 64: Recompiled](https://github.com/Rainchus/Donkey-Kong-64-Recompiled) 1.0.3. For the PC version, see the upstream repository.*
 
-> **Nintendo Switch port.** This fork (branch `nx`) adds a homebrew Switch build in
-> [`switch/`](switch/README.md): GLideN64 instead of RT64, 960×720 16:9 at 30 fps on hardware.
-> Build and install instructions are in [switch/README.md](switch/README.md). The rest of this
-> README is upstream's and describes the PC release.
+The game code is the same static recompilation as the PC release. What changes is everything
+around it: the renderer (GLideN64 instead of RT64), the OS layer and the threading model.
 
-Donkey Kong 64: Recompiled is a project that uses [N64: Recompiled](https://github.com/Mr-Wiseguy/N64Recomp) to **statically recompile** Donkey Kong 64 into a native port with many new features and enhancements. This project uses [RT64](https://github.com/rt64/rt64) as the rendering engine to provide some of these enhancements.
+| Measured on hardware | |
+|---|---|
+| Frame rate | 30 fps, the game's original rate |
+| Resolution | 960×720 (3× native), 16:9 widescreen with the HUD at the screen edges |
+| Audio | 48 kHz, in real time, no dropouts |
+| Saves | Yes |
 
-### [Check out the latest release here](https://github.com/Rainchus/Donkey-Kong-64-Recompiled/releases).
+<p align="center">
+  <img src="docs/screenshots/dk-isles.jpg" width="49%" alt="DK Isles in the intro, 16:9">
+  <img src="docs/screenshots/gameplay.jpg" width="49%" alt="Donkey Kong on DK Isles">
+  <img src="docs/screenshots/cranky.jpg" width="49%" alt="Cranky's lab cutscene">
+  <img src="docs/screenshots/hud.jpg" width="49%" alt="HUD at the right screen edge">
+</p>
+<p align="center"><sub>Captured on a Nintendo Switch with the console's Capture button.</sub></p>
 
-### **This repository and its releases do not contain game assets. The original game is required to build or run this project.**
+# Quick Start
 
-<div align="left" valign="middle">
-<a href="https://runblaze.dev">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://www.runblaze.dev/logo_dark.png">
-   <img align="right" src="https://www.runblaze.dev/logo_light.png" height="102px"/>
- </picture>
-</a>
+DK64Recomp-NX does not include any copyrighted assets. You are required to provide a supported
+copy of the game.
 
-<br style="display: none;"/>
+### 1. Verify your ROM dump
 
-_Thank you [Blaze](https://runblaze.dev) for supporting this project by providing Linux ARM64 and Apple Silicon macOS Github Action Runners!_
+Only **Donkey Kong 64 (USA)** is supported.
 
-</div>
+US SHA-1 (`.z64`): `cf806ff2603640a748fca5026ded28802f1f4a50`
 
-## Table of Contents
-* [System Requirements](#system-requirements)
-* [Features](#features)
-  * [Plug and Play](#plug-and-play)
-  * [Fully Intact N64 Effects](#fully-intact-n64-effects)
-  * [Easy-to-Use Menus](#easy-to-use-menus)
-  * [High Framerate Support](#high-framerate-support)
-  * [Low Input Lag](#low-input-lag)
-  * [Instant Load Times](#instant-load-times)
-  * [Linux and Steam Deck Support](#linux-and-steam-deck-support)
-* [Planned Features](#planned-features)
-* [FAQ](#faq)
-* [Known Issues](#known-issues)
-* [Building](#building)
-* [Libraries Used and Projects Referenced](#libraries-used-and-projects-referenced)
+`.n64` and `.v64` dumps also work (they are converted on first launch), but their hash differs from
+the one above. To check a `.z64` dump:
+* Windows: `certutil -hashfile "Donkey Kong 64 (USA).z64" SHA1`
+* macOS: `shasum "Donkey Kong 64 (USA).z64"`
+* Linux: `sha1sum "Donkey Kong 64 (USA).z64"`
 
-## System Requirements
-A GPU supporting Direct3D 12.0 (Shader Model 6) or Vulkan 1.2 is required to run this project. The oldest GPUs that should be supported for each vendor are:
-* GeForce GT 630
-* Radeon HD 7750 (the one from 2012, not to be confused with the RX 7000 series) and newer
-* Intel HD 510 (Skylake)
+### 2. Download DK64Recomp-NX from [Releases](https://github.com/jean-treves/DK64Recomp-NX/releases)
 
-A CPU supporting the AVX instruction set is also required (Intel Core 2000 series or AMD Bulldozer and newer).
+### 3. Copy the files to your SD card
 
-If you have issues with crashes on startup, make sure your graphics drivers are fully up to date. 
+Put the `.nro` and your ROM in the same folder (the ROM file name does not matter):
 
-## Features
+```
+sdcard
+└── switch
+    └── dk64recomp
+        ├── dk64recomp.nro
+        └── Donkey Kong 64 (USA).z64
+```
 
-#### Fully Intact N64 Effects
-A lot of care was put into RT64 to make sure all graphical effects were rendered exactly as they did originally on the N64. No workarounds or "hacks" were made to replicate these effects, with the only modifications to them being made for enhancement purposes such as widescreen support.
+### 4. Launch the game
 
-#### Easy-to-Use Menus
-Gameplay settings, graphics settings, input mappings, and audio settings can all be configured with the in-game config menu. The menus can all be used with mouse, controller, or keyboard for maximum convenience.
+Launch via Atmosphère's **Game+R** method: hold **R** while starting any game, then pick
+*DK64: Recompiled* in the Homebrew Menu. The game needs full RAM access; launched from the Album
+(applet mode), it does not have enough memory.
 
-#### High Framerate Support
-Play at any framerate you want thanks to functionality provided by RT64! Game objects and terrain, texture scrolling, screen effects, and most HUD elements are all rendered at high framerates. By default, this project is configured to run at your monitor's refresh rate. You can also play at the original framerate of the game if you prefer. **Changing framerate has no effect on gameplay.**
+On first launch the ROM is checked and a copy is stored as `DK64.z64` in the same folder.
 
-**Note**: External framerate limiters (such as the NVIDIA Control Panel) are known to potentially cause problems, so if you notice any stuttering then turn them off and use the manual framerate slider in the in-game graphics menu instead.
+### 5. Play!
 
-#### Widescreen and Ultrawide Support
-Any aspect ratio is supported, with most effects modded to work correctly in widescreen. The HUD can also be positioned at 16:9 when using ultrawide aspect ratios if preferred.
+Congratulations, you are now back on DK Isles! Have fun!
 
-**Note**: Some animation quirks can be seen at the edges of the screen in certain cutscenes when using very wide aspect ratios.
+Your saves are in `sdmc:/switch/dk64recomp/saves/`.
 
-#### Additional Control Options
-Customize your experience by setting your stick deadzone to your liking, as well as adjusting the X and Y axis inversion for aiming.
+# Controls
 
-#### Low Input Lag
-This project has been optimized to have as little input lag as possible, making the game feel more responsive than ever!
+| N64 | Nintendo Switch |
+| - | - |
+| **A** | **A** |
+| **B** | **B** |
+| **Z** | **ZL** |
+| **L** | **L** |
+| **R** | **R** / **ZR** |
+| **Start** | **+ (Plus)** |
+| **Control Stick** | **Left Stick** |
+| **C Buttons** | **Right Stick** (camera) |
+| **D-Pad** | **D-Pad** |
 
-#### Instant Load Times
-Saving and loading files, going from place to place, and pausing all happen in the blink of an eye thanks to the game running natively on modern hardware.
+# Settings
 
-#### Linux and Steam Deck Support
-A Linux binary is available for playing on most up-to-date distros, including on the Steam Deck.
+There is no settings menu yet. The port uses these defaults:
 
-To play on Steam Deck, extract the Linux build onto your deck. Then, in desktop mode, right click the DK64Recompiled executable file and select "Add to Steam". From there, you can return to Gaming mode and configure the controls as needed. See the [Steam Deck gyro aim FAQ section](#how-do-i-set-up-gyro-aiming-on-steam-deck) for more detailed instructions.
+| Setting | Value |
+|---|---|
+| Aspect ratio | 16:9 (PC option *Expand*) |
+| HUD placement | Screen edges (PC option *Expand*) |
+| Resolution | 960×720 (3× native) |
+| Frame rate | Original (30 fps) |
+| Cutscene borders | Off |
+| Camera | Free camera on the right stick |
 
-## FAQ
+# Known limitations
 
-#### What is static recompilation?
-Static recompilation is the process of automatically [translating an application from one platform to another](https://www.youtube.com/watch?v=lMGu6Ng_3yA&t=55s). For more details, check out the full description of how this project's recompilation works here: [N64: Recompiled](https://github.com/Mr-Wiseguy/N64Recomp).
+* **No mods yet.** `.nrm` mods are compiled at runtime by the PC version; that needs executable
+  memory and code patching on Horizon, which is work in progress.
+* **No in-game settings menu** (the PC menus are drawn by RT64).
+* **No RT64-only features:** 60 fps frame interpolation, HD texture packs, MSAA.
+* **Widescreen pop-in:** the game decides what to draw for a 4:3 view, so objects can appear late
+  at the left and right edges. The PC version does the same.
 
-#### How is this related to the in-progress decompilation project?
-Unlike N64 ports in the past, this project is not based on the source code provided by a decompilation of the game. This is because static recompilation bypasses the need for decompiled source code when making a port, allowing ports to be made **without source code**. However, the reverse engineering work done by the decompilation team was invaluable for providing some of the enhancements featured in this project. For this reason, the project uses headers and some functions from the decompilation project in order to make modifications to the game. Many thanks to the decompilation team for all of the hard work they've done.
+# Troubleshooting
 
-#### Where is the savefile stored?
-- Windows: `%LOCALAPPDATA%\DK64Recompiled\saves`
-- Linux: `~/.config/DK64Recompiled/saves`
+* **"No valid Donkey Kong 64 ROM found"**: the ROM must be in `sdmc:/switch/dk64recomp/` and be the USA version (hash above).
+* **Crash or black screen on launch**: make sure you used Game+R, not the Album.
+* Each run writes `sdmc:/switch/dk64recomp/dk64recomp.log`. Attach it when you open an
+  [issue](https://github.com/jean-treves/DK64Recomp-NX/issues); after a crash it contains the
+  faulting address.
 
-#### How do I choose a different ROM?
-**You don't.** This project is **only** a port of Donkey Kong 64 and it will only accept one specific ROM: the US version of the N64 release of Donkey Kong 64. ROMs in formats other than .z64 will be automatically converted, as long as it is the correct ROM. **It is not an emulator and it cannot run any arbitrary ROM.** 
+# Development
 
-If you want to play a modded ROM or in another language, note that support for modding and other languages will be added to the project itself in the future and will not rely on you supplying a different ROM. 
+### Building
 
-## Known Issues
-* Intel GPUs on Linux may not currently work. If you have experience with Vulkan development on Linux, help here would be greatly appreciated!
-* The prebuilt Linux binary may not work correctly on some distributions of Linux. If you encounter such an issue, building the project locally yourself is recommended. A Flatpak or AppImage may be provided in the future to solve this issue. Adding the Linux version to Steam and setting "Steam Linux Runtime" as the compatibility tool or launching it via Gamescope may work around the issue. Alternatively, running the Windows version with Proton is known to work well and may also work around this issue.
-* Overlays such as MSI Afterburner and other software such as Wallpaper Engine can cause performance issues with this project that prevent the game from rendering correctly. Disabling such software is recommended.
+Requirements: git, Docker and python3. The scripts run in the `ubuntu:24.04` and
+`devkitpro/devkita64` images, so nothing else is installed on your machine.
 
-## Building
-Building is not required to play this project, as prebuilt binaries (which do not contain game assets) can be found in the [Releases](https://github.com/Rainchus/Donkey-Kong-64-Recompiled/releases) section. Instructions on how to build this project can be found in the [BUILDING.md](BUILDING.md) file.
+```bash
+git clone https://github.com/jean-treves/DK64Recomp-NX
+cd DK64Recomp-NX
+git submodule update --init --recursive lib/N64ModernRuntime lib/GLideN64 lib/dk64_decomp
+git submodule update --init lib/rt64
+# 1. Recompile the game from your ROM (once per ROM, ~5 min)
+docker run --rm -v "$PWD:/work" -v "/path/to/rom/folder:/rom:ro" ubuntu:24.04 bash /work/switch/codegen.sh "/rom/Donkey Kong 64 (USA).z64"
+# 2. Build the .nro (~10 min the first time)
+switch/build.sh
+```
 
-## Libraries Used and Projects Referenced
-* [RT64](https://github.com/rt64/rt64) for the project's rendering engine
-* [RmlUi](https://github.com/mikke89/RmlUi) for building the menus and launcher
-* [lunasvg](https://github.com/sammycage/lunasvg) for SVG rendering, used by RmlUi
-* [FreeType](https://freetype.org/) for font rendering, used by RmlUi  
-* [moodycamel::ConcurrentQueue](https://github.com/cameron314/concurrentqueue) for semaphores and fast, lock-free MPMC queues
-* [Gamepad Motion Helpers](https://github.com/JibbSmart/GamepadMotionHelpers) for sensor fusion and calibration algorithms to implement gyro aiming
-* [Donkey Kong 64 Decompilation](https://gitlab.com/dk64_decomp/dk64) for headers and some function definitions, used for making patches or some enhancements
-* [Ares emulator](https://github.com/ares-emulator/ares) for RSP vector instruction reference implementations, used in RSP recompilation
+The result is `switch/build/dk64recomp.nro`. Nothing derived from the ROM is tracked in git.
 
-Special thanks to [thecozies](https://github.com/thecozies) for designing and helping implement the launcher and config menus!<br/>
-Also special thanks to [fewffwa](https://github.com/fewffwa) for testing multiple in development builds and bug reporting.
+### Testing without copying files
+
+Start the Homebrew Menu, press **Y**, then run `nxlink -s switch/build/dk64recomp.nro` from
+devkitPro's `switch-tools`. The game's log streams to your terminal.
+
+### How it works
+
+The PC port draws with [RT64](https://github.com/rt64/rt64), which needs Vulkan, D3D12 or Metal.
+Horizon homebrew has none of them, so the renderer is replaced by
+[GLideN64](https://github.com/gonetz/GLideN64) on OpenGL (mesa nouveau). Both read the same
+mupen64plus `GFX_INFO` view of the recompiled RDRAM, so GLideN64 plugs into the runtime's
+`RendererContext` without converting anything.
+
+| Piece | What it does |
+|---|---|
+| `switch/gliden64_rt64ex.cpp` | Decodes the RT64 extended GBI (opcode `0x64`) that DK64R's patches emit: rectangles, scissors, viewports, extended RDRAM addresses, and the alignment hints used for widescreen |
+| `switch/render_gliden64.cpp` | `RendererContext` over GLideN64, plus the present hold described below |
+| `switch/core_switch.cpp` | Minimal mupen64plus core: in-memory config and video extension over SDL2 |
+| `switch/main_switch.cpp`, `input_switch.cpp`, `frontend_switch.cpp` | Entry point, audio, controllers, and the settings the PC menus would set |
+| `switch/threads_switch.c`, `mman_switch.c`, `crash_switch.c`, `shim/` | libnx gaps: thread stacks and cores, `mmap`, a crash handler that prints module offsets |
+| `switch/patches/` | Changes to the pinned N64ModernRuntime, N64Recomp and GLideN64 commits, applied by `build.sh` |
+
+### Problems found on hardware
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Abort at startup | libnx has no `pthread_detach` | `--wrap=pthread_detach` no-op |
+| "Failed to write to the save file" | libstdc++'s `copy_file` ends with `fchmod`, which the SD driver rejects | Save rotation with renames (`files.cpp`) |
+| Freeze on the Nintendo logo | GLideN64 presents on the graphics thread and blocks on vsync; the action queue never drained and the VI producer starved display lists | Skip a screen update when a newer one is already queued (`events.cpp`) |
+| High-pitched, distorted music | Upstream's latency guard divides by the game's rate (22 050 Hz) instead of the output rate (48 000 Hz) | Latency measured at the output rate; drop whole chunks past 250 ms |
+| Music cutting out | 256-frame SDL buffers; the Switch backend releases one per ~10 ms | 1024-frame buffers |
+| Image jitter in motion only | DK64 starts frame N+2 in the buffer still on screen and relies on the RDP freeze to hold it back; the runtime does not freeze, so frames showed as N, N+2, N+1… | Do not re-present a front buffer that was redrawn (one held present per frame, 60 per 2 s, confirmed on hardware) |
+| Widescreen | RT64's *Expand* has no GLideN64 equivalent | GLideN64's 16:9 adjust mode, steered by DK64R's RT64 alignment commands: HUD anchored left/right, sky and backgrounds stretched, screen transitions anchored as on PC |
+
+# Licensing
+
+This fork is GPL-3.0, like upstream. GLideN64 is licensed under GPL version 2 without the
+"or later" clause, which is not compatible with GPL-3.0 inside one binary. Building from source
+for your own use is unaffected.
+
+# Special Thanks
+
+* Rainchus and the [DK64: Recompiled](https://github.com/Rainchus/Donkey-Kong-64-Recompiled) team
+* The [dk64 decompilation](https://gitlab.com/dk64_decomp/dk64) team
+* Wiseguy for [N64Recomp](https://github.com/N64Recomp/N64Recomp) and N64ModernRuntime
+* gonetz and the [GLideN64](https://github.com/gonetz/GLideN64) contributors
+* The HarbourMasters Switch ports ([PaperBoat-NX-Modern](https://github.com/Thorhax/PaperBoat-NX-Modern),
+  [Docklight](https://github.com/PalindromicBreadLoaf/Docklight),
+  [2ship2harkinian-Switch](https://github.com/YoshiCrystal9/2ship2harkinian-Switch)) for the libnx/mesa platform recipe
+* devkitPro for devkitA64 and libnx
+
+<sub>Ported with the help of Claude (Anthropic), tested on real hardware.</sub>
