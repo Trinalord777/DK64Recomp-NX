@@ -17,6 +17,10 @@ include_directories(BEFORE ${CMAKE_CURRENT_SOURCE_DIR}/shim)
 add_compile_definitions(_GNU_SOURCE=1 FMT_USE_FALLBACK_FILE=1)
 # Frame records let crash_switch.c walk the call stack.
 add_compile_options(-fno-omit-frame-pointer)
+# Source paths in the binary (asserts, logs) relative to the repository: no local paths in a
+# released .nro, and the same build from any checkout.
+get_filename_component(ROOT_ABS ${ROOT} ABSOLUTE)
+add_compile_options(-ffile-prefix-map=${ROOT_ABS}/=)
 # fmt's os.cc needs fdopen/fileno, which newlib hides; nothing here uses fmt::file.
 set(FMT_OS OFF CACHE BOOL "" FORCE)
 
