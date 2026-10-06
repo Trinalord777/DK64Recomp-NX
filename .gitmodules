@@ -15,3 +15,6 @@
 [submodule "lib/vcpkg"]
 	path = lib/vcpkg
 	url = https://github.com/microsoft/vcpkg
+[submodule "lib/GLideN64"]
+	path = lib/GLideN64
+	url = https://github.com/gonetz/GLideN64

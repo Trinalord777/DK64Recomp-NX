@@ -72,3 +72,6 @@ gamecontrollerdb.txt
 # Just linux things
 build.log
 DK64Recompiled
+# Nintendo Switch port
+switch/build*/
+switch/tools/

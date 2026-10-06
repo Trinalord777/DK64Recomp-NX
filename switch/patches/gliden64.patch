@@ -1,0 +1,171 @@
+diff --git a/src/GBI.cpp b/src/GBI.cpp
+index 0423612..cdf0dbb 100644
+--- a/src/GBI.cpp
++++ b/src/GBI.cpp
+@@ -8,6 +8,8 @@
+ #include "N64.h"
+ #include "GLideN64.h"
+ #include "GBI.h"
++
++void RT64EX_Init();
+ #include "RDP.h"
+ #include "RSP.h"
+ #include "uCodes/F3D.h"
+@@ -228,6 +230,7 @@ void GBIInfo::_makeCurrent(MicrocodeInfo * _pCurrent)
+ 			break;
+ 			case F3DEX2:
+ 				F3DEX2_Init();
++				RT64EX_Init(); // DK64NX: RT64 extended GBI emitted by the recomp's patches
+ 				m_hwlSupported = true;
+ 				gSP.clipRatio = 2U;
+ 			break;
+diff --git a/src/Graphics/OpenGLContext/GLSL/glsl_CombinerProgramUniformFactoryCommon.cpp b/src/Graphics/OpenGLContext/GLSL/glsl_CombinerProgramUniformFactoryCommon.cpp
+index 05f5892..83901a8 100644
+--- a/src/Graphics/OpenGLContext/GLSL/glsl_CombinerProgramUniformFactoryCommon.cpp
++++ b/src/Graphics/OpenGLContext/GLSL/glsl_CombinerProgramUniformFactoryCommon.cpp
+@@ -489,12 +489,15 @@ public:
+ 		float adjustTrans[2] = { 0.0f, 0.0f };
+ 		float adjustScale[2] = { 1.0f, 1.0f };
+ 		if (dwnd().isAdjustScreen() && (gDP.colorImage.width > VI.width * 98 / 100)) {
+-			if (isOrthographicProjection) {
++			if (g_rt64ViewportOrigin < 0x800) {
++				adjustScale[0] = dwnd().getAdjustScale();
++				adjustTrans[0] = RT64EX_OriginX(g_rt64ViewportOrigin, static_cast<f32>(gDP.colorImage.width)) * (1.0f - adjustScale[0]);
++			} else if (isOrthographicProjection) {
+ 				adjustScale[1] = 1.0f / dwnd().getAdjustScale();
+ 				adjustTrans[1] = static_cast<f32>(gDP.colorImage.width) * 3.0f / 4.0f * (1.0f - adjustScale[1]) / 2.0f;
+-			} else {
++			} else if (!g_rt64ProjStretch) {
+ 				adjustScale[0] = dwnd().getAdjustScale();
+-				adjustTrans[0] = static_cast<f32>(gDP.colorImage.width) * (1.0f - adjustScale[0]) / 2.0f;
++				adjustTrans[0] = RT64EX_OriginX(g_rt64ViewportOrigin, static_cast<f32>(gDP.colorImage.width)) * (1.0f - adjustScale[0]);
+ 			}
+ 		}
+ 		uVTrans.set(gSP.viewport.vtrans[0], gSP.viewport.vtrans[1], _force);
+diff --git a/src/Graphics/OpenGLContext/ThreadedOpenGl/atomicops.h b/src/Graphics/OpenGLContext/ThreadedOpenGl/atomicops.h
+index ff828ca..513c31d 100644
+--- a/src/Graphics/OpenGLContext/ThreadedOpenGl/atomicops.h
++++ b/src/Graphics/OpenGLContext/ThreadedOpenGl/atomicops.h
+@@ -349,7 +349,7 @@ extern "C" {
+ }
+ #elif defined(__MACH__)
+ #include <mach/mach.h>
+-#elif defined(__unix__)
++#elif defined(__unix__) || defined(__SWITCH__)
+ #include <semaphore.h>
+ #endif
+ 
+@@ -483,7 +483,7 @@ namespace moodycamel
+ 				}
+ 			}
+ 		};
+-#elif defined(__unix__)
++#elif defined(__unix__) || defined(__SWITCH__)
+ 		//---------------------------------------------------------
+ 		// Semaphore (POSIX, Linux)
+ 		//---------------------------------------------------------
+diff --git a/src/GraphicsDrawer.cpp b/src/GraphicsDrawer.cpp
+index 9f7796f..552aa08 100644
+--- a/src/GraphicsDrawer.cpp
++++ b/src/GraphicsDrawer.cpp
+@@ -216,7 +216,7 @@ void GraphicsDrawer::updateScissor(FrameBuffer * _pBuffer) const
+ 		SY1 *= 512.0f / SX1;
+ 	}
+ 
+-	if (_needAdjustCoordinate(wnd))
++	if (_needAdjustCoordinate(wnd) && !g_rt64ScissorWide && g_rt64ViewportOrigin >= 0x800)
+ 		_adjustScissorX(SX0, SX1, wnd.getAdjustScale());
+ 
+ 	gfxContext.setScissor(roundup(SX0, scaleX), roundup(SY0, scaleY),
+@@ -1165,13 +1165,12 @@ void GraphicsDrawer::drawRect(int _ulx, int _uly, int _lrx, int _lry)
+ 	m_rect[3].bc1 = 1.0f;
+ 
+ 	DisplayWindow & wnd = dwnd();
+-	if (wnd.isAdjustScreen() && (gDP.colorImage.width > VI.width * 98 / 100) && (static_cast<u32>(_lrx - _ulx) < VI.width * 9 / 10)) {
+-		const float scale = wnd.getAdjustScale();
+-		const float offsetx = static_cast<f32>(gDP.colorImage.width) * (1.0f - scale) / 2.0f;
+-		for (u32 i = 0; i < 4; ++i) {
+-			m_rect[i].x *= scale;
+-			m_rect[i].x += offsetx;
+-		}
++	if (wnd.isAdjustScreen() && (gDP.colorImage.width > VI.width * 98 / 100) &&
++		RT64EX_ShouldAdjustRect(static_cast<u32>(_lrx - _ulx) < VI.width * 9 / 10)) {
++		f32 xs[4];
++		for (u32 i = 0; i < 4; ++i) xs[i] = m_rect[i].x;
++		RT64EX_AdjustRectX(xs, 4, wnd.getAdjustScale(), static_cast<f32>(gDP.colorImage.width));
++		for (u32 i = 0; i < 4; ++i) m_rect[i].x = xs[i];
+ 	}
+ 
+ 	Context::DrawRectParameters rectParams;
+@@ -1505,14 +1504,13 @@ void GraphicsDrawer::drawTexturedRect(const TexturedRectParams & _params)
+ 
+ 	if (wnd.isAdjustScreen() && !bUseFbTexture &&
+ 		(_params.forceAjustScale ||
+-		((gDP.colorImage.width > VI.width * 98 / 100) && (static_cast<u32>(_params.lrx - _params.ulx) < VI.width * 9 / 10))))
++		((gDP.colorImage.width > VI.width * 98 / 100) &&
++		 RT64EX_ShouldAdjustRect(static_cast<u32>(_params.lrx - _params.ulx) < VI.width * 9 / 10))))
+ 	{
+-		const float scale = wnd.getAdjustScale();
+-		const float offsetx = static_cast<f32>(gDP.colorImage.width) * (1.0f - scale) / 2.0f;
+-		for (u32 i = 0; i < 4; ++i) {
+-			m_rect[i].x *= scale;
+-			m_rect[i].x += offsetx;
+-		}
++		f32 xs[4];
++		for (u32 i = 0; i < 4; ++i) xs[i] = m_rect[i].x;
++		RT64EX_AdjustRectX(xs, 4, wnd.getAdjustScale(), static_cast<f32>(gDP.colorImage.width));
++		for (u32 i = 0; i < 4; ++i) m_rect[i].x = xs[i];
+ 	}
+ 
+ 	m_rect[0].bc0 = 0.0f;
+diff --git a/src/RSP.h b/src/RSP.h
+index bf3ba27..eaa2fc3 100644
+--- a/src/RSP.h
++++ b/src/RSP.h
+@@ -22,7 +22,19 @@ extern RSPInfo RSP;
+ extern u32 DepthClearColor;
+ extern u32 rectDepthBufferCopyFrame;
+ 
+-#define RSP_SegmentToPhysical( segaddr ) ((gSP.segment[(segaddr >> 24) & 0x0F] + (segaddr & RDRAMSize)) & RDRAMSize)
++// DK64NX: RT64's segment rules (fromSegmented + maskPhysicalAddress), including its extended
++// RDRAM mode, live in switch/gliden64_rt64ex.cpp.
++u32 RSP_SegmentToPhysicalEx(u32 segaddr);
++#define RSP_SegmentToPhysical( segaddr ) RSP_SegmentToPhysicalEx(segaddr)
++
++// RT64 extended GBI alignment state (switch/gliden64_rt64ex.cpp) steering the 16:9 "adjust" mode.
++extern bool g_rt64ProjStretch;
++extern bool g_rt64ScissorWide;
++extern bool g_rt64ScissorPlain;
++extern u16 g_rt64ViewportOrigin;
++f32 RT64EX_OriginX(u16 origin, f32 width);
++bool RT64EX_ShouldAdjustRect(bool narrow);
++void RT64EX_AdjustRectX(f32* xs, u32 count, f32 scale, f32 width);
+ 
+ void RSP_Init();
+ void RSP_ProcessDList();
+diff --git a/src/gDP.cpp b/src/gDP.cpp
+index a2805c4..44881c1 100644
+--- a/src/gDP.cpp
++++ b/src/gDP.cpp
+@@ -775,6 +775,8 @@ void gDPLoadTLUT( u32 tile, u32 uls, u32 ult, u32 lrs, u32 lrt )
+ 
+ void gDPSetScissor(u32 mode, s16 xh, s16 yh, s16 xl, s16 yl)
+ {
++	g_rt64ScissorWide = false;
++	g_rt64ScissorPlain = false;
+ 	gDP.scissor.mode = mode;
+ 	gDP.scissor.xh = xh;
+ 	gDP.scissor.yh = yh;
+diff --git a/src/uCodes/F3DEX2.cpp b/src/uCodes/F3DEX2.cpp
+index dc98298..b30ee8b 100644
+--- a/src/uCodes/F3DEX2.cpp
++++ b/src/uCodes/F3DEX2.cpp
+@@ -93,7 +93,7 @@ void F3DEX2_MoveWord( u32 w0, u32 w1 )
+ 			gSPClipRatio( w1 );
+ 			break;
+ 		case G_MW_SEGMENT:
+-			gSPSegment( _SHIFTR( w0, 2, 4 ) , w1 & 0x00FFFFFF );
++			gSPSegment( _SHIFTR( w0, 2, 4 ) , w1 ); // DK64NX: masked in RSP_SegmentToPhysicalEx
+ 			break;
+ 		case G_MW_FOG:
+ 			gSPFogFactor( (s16)_SHIFTR( w1, 16, 16 ), (s16)_SHIFTR( w1, 0, 16 ) );

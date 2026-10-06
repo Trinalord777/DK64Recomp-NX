@@ -1,4 +1,10 @@
 # Donkey Kong 64: Recompiled
+
+> **Nintendo Switch port.** This fork (branch `nx`) adds a homebrew Switch build in
+> [`switch/`](switch/README.md): GLideN64 instead of RT64, 960×720 16:9 at 30 fps on hardware.
+> Build and install instructions are in [switch/README.md](switch/README.md). The rest of this
+> README is upstream's and describes the PC release.
+
 Donkey Kong 64: Recompiled is a project that uses [N64: Recompiled](https://github.com/Mr-Wiseguy/N64Recomp) to **statically recompile** Donkey Kong 64 into a native port with many new features and enhancements. This project uses [RT64](https://github.com/rt64/rt64) as the rendering engine to provide some of these enhancements.
 
 ### [Check out the latest release here](https://github.com/Rainchus/Donkey-Kong-64-Recompiled/releases).
