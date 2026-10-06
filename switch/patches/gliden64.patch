@@ -20,10 +20,10 @@ index 0423612..cdf0dbb 100644
  				gSP.clipRatio = 2U;
  			break;
 diff --git a/src/Graphics/OpenGLContext/GLSL/glsl_CombinerProgramUniformFactoryCommon.cpp b/src/Graphics/OpenGLContext/GLSL/glsl_CombinerProgramUniformFactoryCommon.cpp
-index 05f5892..83901a8 100644
+index 05f5892..38caba9 100644
 --- a/src/Graphics/OpenGLContext/GLSL/glsl_CombinerProgramUniformFactoryCommon.cpp
 +++ b/src/Graphics/OpenGLContext/GLSL/glsl_CombinerProgramUniformFactoryCommon.cpp
-@@ -489,12 +489,15 @@ public:
+@@ -489,12 +489,17 @@ public:
  		float adjustTrans[2] = { 0.0f, 0.0f };
  		float adjustScale[2] = { 1.0f, 1.0f };
  		if (dwnd().isAdjustScreen() && (gDP.colorImage.width > VI.width * 98 / 100)) {
@@ -31,11 +31,12 @@ index 05f5892..83901a8 100644
 +			if (g_rt64ViewportOrigin < 0x800) {
 +				adjustScale[0] = dwnd().getAdjustScale();
 +				adjustTrans[0] = RT64EX_OriginX(g_rt64ViewportOrigin, static_cast<f32>(gDP.colorImage.width)) * (1.0f - adjustScale[0]);
++			} else if (g_rt64ProjStretch) {
++				// STRETCH projection (sky, framebuffer effects): drawn for the 4:3 frame, widened with the screen.
 +			} else if (isOrthographicProjection) {
  				adjustScale[1] = 1.0f / dwnd().getAdjustScale();
  				adjustTrans[1] = static_cast<f32>(gDP.colorImage.width) * 3.0f / 4.0f * (1.0f - adjustScale[1]) / 2.0f;
--			} else {
-+			} else if (!g_rt64ProjStretch) {
+ 			} else {
  				adjustScale[0] = dwnd().getAdjustScale();
 -				adjustTrans[0] = static_cast<f32>(gDP.colorImage.width) * (1.0f - adjustScale[0]) / 2.0f;
 +				adjustTrans[0] = RT64EX_OriginX(g_rt64ViewportOrigin, static_cast<f32>(gDP.colorImage.width)) * (1.0f - adjustScale[0]);

@@ -163,10 +163,13 @@ RECOMP_PATCH Gfx *func_global_asm_80629300(Gfx *dl) {
             gDPSetScissor(dl++, G_SC_NON_INTERLACE, D_global_asm_80744498, D_global_asm_8074449C, D_global_asm_807444A0, D_global_asm_807444A4);
             gDPSetRenderMode(dl++, G_RM_XLU_SURF, G_RM_XLU_SURF2);
             recomp_get_ui_bounds(&width, &height);
+            // @nx: RT64 keeps a widescreen copy of the framebuffer, so these effects draw it UI-wide from the left
+            // edge. GLideN64's copy is 320 texels whatever the aspect ratio (its 16:9 image is squeezed into them):
+            // draw it over the 4:3 frame without an origin and let the STRETCH projection widen it to the screen.
+            width = 320;
             gEXPushScissor(dl++);
             gEXPushViewport(dl++);
             gEXSetScissor(dl++, G_SC_NON_INTERLACE, G_EX_ORIGIN_LEFT, G_EX_ORIGIN_RIGHT, 0, 0, 0, D_global_asm_80744494);
-            gEXSetViewportAlign(dl++, G_EX_ORIGIN_LEFT, 0, 0);
             switch (D_global_asm_807F5D85) {
                 case 7: // Pausing (Blurred Background)
                     // @recomp: We can't morph the framebuffer image as this breaks RT64 widescreen support
