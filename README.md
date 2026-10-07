@@ -36,7 +36,7 @@ the one above. To check a `.z64` dump:
 * macOS: `shasum "Donkey Kong 64 (USA).z64"`
 * Linux: `sha1sum "Donkey Kong 64 (USA).z64"`
 
-### 2. Download DK64Recomp-NX from [Releases](https://github.com/jean-treves/DK64Recomp-NX/releases)
+### 2. Download DK64Recomp-NX from [Releases](https://github.com/Trinalord777/DK64Recomp-NX/releases)
 
 ### 3. Copy the files to your SD card
 
@@ -96,7 +96,7 @@ There is no settings menu yet. The port uses these defaults:
 * **"No valid Donkey Kong 64 ROM found"**: the ROM must be in `sdmc:/switch/dk64recomp/` and be the USA version (hash above).
 * **Crash or black screen on launch**: make sure you used Game+R, not the Album.
 * Each run writes `sdmc:/switch/dk64recomp/dk64recomp.log`. Attach it when you open an
-  [issue](https://github.com/jean-treves/DK64Recomp-NX/issues); after a crash it contains the
+  [issue](https://github.com/Trinalord777/DK64Recomp-NX/issues); after a crash it contains the
   faulting address.
 
 # Development
@@ -107,7 +107,7 @@ Requirements: git, Docker and python3. The scripts run in the `ubuntu:24.04` and
 `devkitpro/devkita64` images, so nothing else is installed on your machine.
 
 ```bash
-git clone https://github.com/jean-treves/DK64Recomp-NX
+git clone https://github.com/Trinalord777/DK64Recomp-NX
 cd DK64Recomp-NX
 git submodule update --init --recursive lib/N64ModernRuntime lib/GLideN64 lib/dk64_decomp
 git submodule update --init lib/rt64

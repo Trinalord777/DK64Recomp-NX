@@ -131,7 +131,7 @@ target_link_libraries(dk64recomp PRIVATE
 nx_generate_nacp(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/dk64recomp.nacp
     NAME "DK64: Recompiled"
-    AUTHOR "DK64Recomp team, Switch port jean-treves"
+    AUTHOR "DK64Recomp team, Switch port Trinalord777"
     VERSION "1.0.3"
 )
 nx_create_nro(dk64recomp_nro
