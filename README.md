@@ -92,12 +92,12 @@ is open.
 | Game | Story skip, lightning flashes, cutscene borders, draw distance |
 | Audio | Music and sound effects volume |
 | Display | Show FPS, aspect ratio (16:9 or 4:3), resolution (2x or 3x) |
-| Performance | Frame rate (30 fps, or 60 fps experimental), clock profile |
+| Performance | Frame rate (30 to 60 fps, experimental above 30), clock profile |
 | System | Quit Game, back to the homebrew menu |
 
-**60 fps (experimental)** runs the game logic every screen refresh instead of every other one, as DK64 already
-does in Jetpac and the arcade. Some timers and mini-games may not keep their original speed. It needs more power
-than handheld mode's default clocks: use it docked, or with a clock profile and the 2x resolution.
+**Frame rate** goes from 30 (the original) to 60 fps in steps of 5. Above 30 it is experimental: the game mixes
+frames of one and two screen refreshes, as it already does in Jetpac (50 fps is four short frames then a long one),
+and stops waiting for the screen between frames. Some timers and mini-games may not keep their original speed.
 
 **Clock profile** raises the clocks in handheld mode only, while the game is in the foreground:
 *Docked GPU in Handheld* is the console's official docked GPU profile (768 MHz); *Horizon OC Docked Clocks*
