@@ -257,6 +257,14 @@ void dk64nx_remote_on_swap(int width, int height);
 #endif
 
 m64p_error nx_VidExt_GL_SwapBuffers(void) {
+    // Above 30 fps a swap does not wait for vblank: ultramodern's graphics thread renders the next display list
+    // only after the present returns, so a blocking swap made every game frame last two VIs.
+    static int applied_interval = -1;
+    const int interval = nx::get(nx::Setting::FrameRate) > 30 ? 0 : swap_interval;
+    if (interval != applied_interval) {
+        SDL_GL_SetSwapInterval(interval);
+        applied_interval = interval;
+    }
     dk64nx_menu_on_swap(SCREEN_WIDTH, SCREEN_HEIGHT);
 #ifdef DK64NX_REMOTE
     dk64nx_remote_on_swap(SCREEN_WIDTH, SCREEN_HEIGHT);

@@ -161,6 +161,13 @@ RECOMP_PATCH void func_global_asm_80600674(void) {
             //@recomp: dont update; stays at 2
             updateLag(newBoost);
         }
+        // @nx: NX Options' frame rate, between 30 and 60 fps: frames of 1 and 2 VIs alternate evenly.
+        {
+            s32 frame_lag = recomp_nx_next_frame_lag();
+            if (D_global_asm_80744478 < frame_lag) {
+                D_global_asm_80744478 = frame_lag;
+            }
+        }
         if (object_timer > 10) {
             while (D_global_asm_8076AF10 + D_global_asm_80744478 > osdata->frame_count) {
                 //@recomp: yield so this progresses correctly

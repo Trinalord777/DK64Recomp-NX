@@ -157,9 +157,24 @@ void dk64nx_perf_stop() {
     apmExit();
 }
 
-// VIs per game frame for the patches (getFrameDelta, updateLag): 2 is the original 30 fps, 1 the experimental 60 fps
-// mode, where the engine runs at lag 1 as it already does in Jetpac and the arcade. Read every frame: switching
-// applies at once.
+// Frame rate of NX Options, read by the patches every frame. Above 30 fps the engine may run frames of a single VI
+// (lag 1), as it already does in Jetpac and the arcade, and scales its physics by each frame's lag.
+namespace {
+    s32 target_fps() { return nx::get(nx::Setting::FrameRate); }
+}
+
+// Fewest VIs a game frame may last (getFrameDelta, updateLag): 2 at the original 30 fps, else 1.
 extern "C" void recomp_nx_get_frame_vis(uint8_t* rdram, recomp_context* ctx) {
-    _return(ctx, static_cast<s32>(nx::get(nx::Setting::FrameRate) == 1 ? 1 : 2));
+    _return(ctx, static_cast<s32>(target_fps() > 30 ? 1 : 2));
+}
+
+// Called once per game frame (calculateLagBoost): the VIs this frame lasts at least, so that frames of 1 and 2 VIs
+// alternate evenly to the chosen rate, e.g. 50 fps = 1, 1, 1, 1, 2 and 45 fps = 1, 1, 2. Game thread only.
+extern "C" void recomp_nx_next_frame_lag(uint8_t* rdram, recomp_context* ctx) {
+    static s32 credit = 0;  // in 1/fps of a VI
+    const s32 fps = target_fps();
+    credit += 60;
+    const s32 lag = credit / fps;
+    credit %= fps;
+    _return(ctx, lag);
 }

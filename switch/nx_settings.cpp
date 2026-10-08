@@ -52,9 +52,9 @@ namespace {
          "Internal resolution. 2x is lighter on the console, 3x fills the height of the 720p screen.",
          1, {"2x (640x480)", "3x (960x720)"}, 0, 0, 0, true},
         {"Performance", "frame_rate", "Frame Rate",
-         "60 fps runs the game logic every screen refresh, as DK64 does in Jetpac and the arcade. Experimental: "
-         "some timers and mini-games may run too fast. Use it docked, or with a clock profile and 2x.",
-         0, {"30 fps (original)", "60 fps (experimental)"}},
+         "30 is the original. Above 30 (experimental) the game mixes frames of one and two screen refreshes, as it "
+         "does in Jetpac, and stops waiting for the screen. Some timers and mini-games may run too fast.",
+         30, {}, 30, 60, 5, false, " fps"},
         {"Performance", "clock_profile", "Clock Profile",
          "Handheld only, while in the game. Docked GPU: the official docked GPU profile (768 MHz). Horizon OC: "
          "the docked CPU, GPU and RAM clocks set in Horizon OC.",

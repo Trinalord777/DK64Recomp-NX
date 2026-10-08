@@ -80,3 +80,4 @@ recomp_get_gyro_inverted_axes = 0x8F000158;
 recomp_get_mouse_inverted_axes = 0x8F00015C;
 /* @nx: NX Options frame rate (switch/perf_switch.cpp) */
 recomp_nx_get_frame_vis = 0x8F000160;
+recomp_nx_next_frame_lag = 0x8F000164;

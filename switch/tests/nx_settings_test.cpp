@@ -13,7 +13,7 @@ int main() {
     assert(nx::get(Setting::MusicVolume) == 100);
     assert(nx::get(Setting::CutsceneBorders) == 1);
     assert(nx::resolution_factor() == 3 && nx::widescreen());
-    assert(nx::get(Setting::FrameRate) == 0 && nx::get(Setting::ClockProfile) == 0);
+    assert(nx::get(Setting::FrameRate) == 30 && nx::get(Setting::ClockProfile) == 0);
 
     // Valid, malformed, unknown and out-of-range lines.
     FILE* file = std::fopen(NX_SETTINGS_PATH, "w");
