@@ -78,12 +78,13 @@ Your saves are in `sdmc:/switch/dk64recomp/saves/`.
 | **C Buttons** | **Right Stick** (camera) |
 | **D-Pad** | **D-Pad** |
 
-Press **L3 + R3** (both sticks) during the game to open **NX Options**.
+Press **− and +** together during the game to open **NX Options**.
 
 # Settings
 
-**NX Options** (L3 + R3) holds the PC version's options. Move with the D-Pad or the left stick, change a value
-with Left/Right or **A**, close with **B** or L3 + R3. The game does not react to the pad while the menu is open.
+**NX Options** (− and + together) holds the PC version's options. Move with the D-Pad or the left stick, change a
+value with Left/Right or **A**, close with **B** or − and + again. The game does not react to the pad while the menu
+is open.
 
 | Section | Options |
 |---|---|

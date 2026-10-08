@@ -37,6 +37,7 @@ namespace {
     std::atomic<SDL_GameController*> current_controller{nullptr};
     std::atomic_bool rumble_on{false};
     std::atomic_bool right_analog_suppressed{false};
+    NxStartFilter start_filter;  // game thread only
 
     float read_axis(SDL_GameController* controller, SDL_GameControllerAxis axis) {
         float value = SDL_GameControllerGetAxis(controller, axis) / AXIS_MAX;
@@ -146,6 +147,7 @@ bool dk64nx_get_input(int controller_num, uint16_t* buttons, float* x, float* y)
     }
     NxPad pad;
     const bool connected = read_game_pad(&pad);
+    pad.buttons = start_filter.apply(pad.buttons, SDL_GetTicks64());
     *buttons = to_n64_buttons(pad);
     *x = pad.lx;
     *y = pad.ly;

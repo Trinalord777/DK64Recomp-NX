@@ -1,4 +1,4 @@
-// "NX Options": the in-game settings menu, opened and closed with L3+R3 (as in mpo_nx). Drawn with Dear ImGui
+// "NX Options": the in-game settings menu, opened and closed with - and + together. Drawn with Dear ImGui
 // over the frame about to be presented, from nx_VidExt_GL_SwapBuffers on the graphics thread. While it is open
 // it owns the pad: the game sees a neutral pad (input_switch.cpp) until every button is released after closing.
 // Nothing touches GL before the menu or the FPS counter is first shown.
@@ -24,7 +24,7 @@ namespace {
     constexpr int SETTING_COUNT = static_cast<int>(Setting::Count);
     constexpr int QUIT_ROW = SETTING_COUNT;
     constexpr int ROW_COUNT = SETTING_COUNT + 1;
-    constexpr uint32_t TOGGLE = NX_LSTICK | NX_RSTICK;
+    constexpr uint32_t TOGGLE = NX_MINUS | NX_PLUS;
     constexpr uint32_t DIRECTIONS = NX_UP | NX_DOWN | NX_LEFT | NX_RIGHT;
     constexpr uint64_t REPEAT_DELAY_MS = 400;
     constexpr uint64_t REPEAT_INTERVAL_MS = 100;
@@ -40,7 +40,7 @@ namespace {
 
     std::atomic_bool owns_pad{false};
     bool is_open = false;
-    // Closed, but the pad stays away from the game until every button is up, so B or L3+R3 do not leak into it.
+    // Closed, but the pad stays away from the game until every button is up, so B, - or + do not leak into it.
     bool release_pending = false;
     bool changed = false;
     bool quit_armed = false;

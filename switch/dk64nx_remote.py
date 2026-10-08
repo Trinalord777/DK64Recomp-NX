@@ -7,7 +7,7 @@ milliseconds; the sticks take x y in [-1, 1], y up.
 Examples
 --------
     dk64nx_remote.py --host 172.22.22.99 status
-    dk64nx_remote.py press LS+RS 200        # open the NX Options menu
+    dk64nx_remote.py press MINUS+PLUS 200   # open the NX Options menu
     dk64nx_remote.py press A 200
     dk64nx_remote.py stick 0 1 1500
     dk64nx_remote.py rstick 1 0 300
