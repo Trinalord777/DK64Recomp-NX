@@ -7,6 +7,7 @@
 #include <memory>
 
 #include <SDL.h>
+#include <switch.h>
 
 #define M64P_PLUGIN_PROTOTYPES 1
 #include "m64p_common.h"
@@ -19,6 +20,10 @@
 void dk64nx_seed_gliden64_config();
 #ifdef DK64NX_REMOTE
 void dk64nx_remote_set_rdram(uint8_t* base);
+void dk64nx_remote_time(int kind, uint64_t start_tick);
+#define DK64NX_TIME(kind, start) dk64nx_remote_time(kind, start)
+#else
+#define DK64NX_TIME(kind, start)
 #endif
 bool dk64nx_front_buffer_redrawn(uint32_t origin);
 
@@ -144,7 +149,9 @@ namespace {
             memcpy(&dmem[TASK_DMEM_OFFSET], words, sizeof(words));
             // HALT | BROKE | TASKDONE, set before ProcessDList as GFX_INFO v2 requires.
             sp_status_reg = 0x0203;
+            [[maybe_unused]] const uint64_t start = armGetSystemTick();
             ProcessDList();
+            DK64NX_TIME(0, start);
         }
 
         void send_dummy_workload(uint32_t) override {}
@@ -160,7 +167,9 @@ namespace {
             } else {
                 held_presents = 0;
                 presented_origin = origin;
+                [[maybe_unused]] const uint64_t start = armGetSystemTick();
                 UpdateScreen();
+                DK64NX_TIME(1, start);
             }
         }
 

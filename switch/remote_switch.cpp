@@ -59,6 +59,31 @@ namespace {
     int shot_width = 0;
     int shot_height = 0;
 
+    // Graphics thread timings (render_gliden64.cpp): 0 = ProcessDList, 1 = UpdateScreen (present).
+    struct Timing {
+        std::atomic<uint64_t> count{0};
+        std::atomic<uint64_t> total_us{0};
+        std::atomic<uint64_t> max_us{0};
+    };
+    Timing timings[2];
+
+    std::string timing_report() {
+        std::string out = "OK";
+        const char* names[] = {"dl", "present"};
+        for (int i = 0; i < 2; i++) {
+            const uint64_t count = timings[i].count.exchange(0);
+            const uint64_t total = timings[i].total_us.exchange(0);
+            const uint64_t max = timings[i].max_us.exchange(0);
+            char entry[96];
+            std::snprintf(entry, sizeof(entry), " %s n=%llu avg=%lluus max=%lluus", names[i],
+                          static_cast<unsigned long long>(count),
+                          static_cast<unsigned long long>(count ? total / count : 0),
+                          static_cast<unsigned long long>(max));
+            out += entry;
+        }
+        return out + "\n";
+    }
+
     struct TrackedThread { std::string name; Handle handle; uint64_t last_ticks; uint64_t last_time; };
     std::mutex threads_mutex;
     std::vector<TrackedThread> threads;
@@ -180,8 +205,9 @@ namespace {
             return out;
         }
         if (command == "cpu") return cpu_load();
+        if (command == "timing") return timing_report();
         if (command == "exp") return "OK\n" + experiments + "END\n";
-        return "ERR commands: press stick rstick shot peek status cpu exp\n";
+        return "ERR commands: press stick rstick shot peek status cpu timing exp\n";
     }
 
     void serve_client(int fd) {
@@ -227,6 +253,15 @@ void dk64nx_remote_start() {
     experiments = dk64nx_run_experiments();
     std::fputs(experiments.c_str(), stdout);
     std::thread(server_loop).detach();
+}
+
+void dk64nx_remote_time(int kind, uint64_t start_tick) {
+    const uint64_t us = armTicksToNs(armGetSystemTick() - start_tick) / 1000;
+    Timing& timing = timings[kind];
+    timing.count++;
+    timing.total_us += us;
+    uint64_t max = timing.max_us.load();
+    while (us > max && !timing.max_us.compare_exchange_weak(max, us)) {}
 }
 
 void dk64nx_remote_set_rdram(uint8_t* base) {
