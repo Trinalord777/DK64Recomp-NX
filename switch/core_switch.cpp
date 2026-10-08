@@ -11,6 +11,7 @@
 #include "m64p_config.h"
 #include "m64p_types.h"
 #include "m64p_vidext.h"
+#include "nx_settings.h"
 
 extern SDL_Window* dk64nx_window;
 
@@ -250,11 +251,13 @@ m64p_error nx_VidExt_GL_GetAttribute(m64p_GLattr attr, int* value) {
     return SDL_GL_GetAttribute(sdl_attr, value) == 0 ? M64ERR_SUCCESS : M64ERR_SYSTEM_FAIL;
 }
 
+void dk64nx_menu_on_swap(int width, int height);
 #ifdef DK64NX_REMOTE
 void dk64nx_remote_on_swap(int width, int height);
 #endif
 
 m64p_error nx_VidExt_GL_SwapBuffers(void) {
+    dk64nx_menu_on_swap(SCREEN_WIDTH, SCREEN_HEIGHT);
 #ifdef DK64NX_REMOTE
     dk64nx_remote_on_swap(SCREEN_WIDTH, SCREEN_HEIGHT);
 #endif
@@ -315,11 +318,11 @@ void dk64nx_seed_gliden64_config() {
     set_param(general, "ScreenWidth", int_param(SCREEN_WIDTH), false);
     set_param(general, "ScreenHeight", int_param(SCREEN_HEIGHT), false);
     set_param(general, "VerticalSync", bool_param(true), false);
-    // 3x native (960x720): the full height of the 720p screen.
-    set_param(gliden, "UseNativeResolutionFactor", int_param(3), false);
+    // 3x native (960x720) fills the height of the 720p screen; 2x (640x480) is lighter.
+    set_param(gliden, "UseNativeResolutionFactor", int_param(nx::resolution_factor()), false);
     // 3 = adjust: 3D widened to 16:9, 2D kept at its aspect and placed by DK64R's RT64 alignment
-    // commands (gliden64_rt64ex.cpp), i.e. the PC port's "Expand" with HUD at the screen edges.
-    set_param(gliden, "AspectRatio", int_param(3), false);
+    // commands (gliden64_rt64ex.cpp), i.e. the PC port's "Expand" with HUD at the screen edges. 1 = 4:3.
+    set_param(gliden, "AspectRatio", int_param(nx::widescreen() ? 3 : 1), false);
     set_param(gliden, "ThreadedVideo", bool_param(false), false);
     set_param(gliden, "txHiresEnable", bool_param(false), false);
     set_param(gliden, "ShowFPS", bool_param(false), false);

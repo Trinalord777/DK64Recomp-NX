@@ -20,6 +20,8 @@
 #include <SDL.h>
 #include <switch.h>
 
+#include "nx_pad.h"
+
 std::string dk64nx_run_experiments();
 
 namespace {
@@ -27,18 +29,24 @@ namespace {
     constexpr uint32_t RDRAM_LIMIT = 64u * 1024 * 1024;
     constexpr uint32_t CURRENT_MAP = 0x8076A0A8;
 
-    struct ButtonName { const char* name; uint16_t bit; };
+    // Switch buttons: the harness acts as a second physical pad, so the NX Options menu sees it too.
+    struct ButtonName { const char* name; uint32_t bit; };
     constexpr ButtonName BUTTONS[] = {
-        {"A", 0x8000}, {"B", 0x4000}, {"Z", 0x2000}, {"START", 0x1000}, {"DU", 0x0800}, {"DD", 0x0400},
-        {"DL", 0x0200}, {"DR", 0x0100}, {"L", 0x0020}, {"R", 0x0010}, {"CU", 0x0008}, {"CD", 0x0004},
-        {"CL", 0x0002}, {"CR", 0x0001},
+        {"A", NX_A}, {"B", NX_B}, {"X", NX_X}, {"Y", NX_Y}, {"L", NX_L}, {"R", NX_R}, {"ZL", NX_ZL},
+        {"ZR", NX_ZR}, {"PLUS", NX_PLUS}, {"MINUS", NX_MINUS}, {"UP", NX_UP}, {"DOWN", NX_DOWN},
+        {"LEFT", NX_LEFT}, {"RIGHT", NX_RIGHT}, {"LS", NX_LSTICK}, {"RS", NX_RSTICK},
+    };
+
+    struct Stick {
+        std::atomic<float> x{0.0f};
+        std::atomic<float> y{0.0f};
+        std::atomic<uint64_t> until{0};
     };
 
     std::atomic<uint32_t> remote_buttons{0};
     std::atomic<uint64_t> buttons_until{0};
-    std::atomic<float> stick_x{0.0f};
-    std::atomic<float> stick_y{0.0f};
-    std::atomic<uint64_t> stick_until{0};
+    Stick left_stick;
+    Stick right_stick;
     std::atomic<uint32_t> presents{0};
     std::atomic<uint8_t*> rdram{nullptr};
     std::string experiments;
@@ -139,16 +147,17 @@ namespace {
         if (command == "press") {
             std::string list; uint64_t ms = 0;
             uint32_t bits = 0;
-            if (!(in >> list >> ms) || !parse_buttons(list, &bits)) return "ERR usage: press A+B 200\n";
+            if (!(in >> list >> ms) || !parse_buttons(list, &bits)) return "ERR usage: press LS+RS 200\n";
             remote_buttons = bits;
             buttons_until = now_ms() + ms;
             return "OK\n";
         }
-        if (command == "stick") {
+        if (command == "stick" || command == "rstick") {
             float x = 0, y = 0; uint64_t ms = 0;
-            if (!(in >> x >> y >> ms)) return "ERR usage: stick 0.0 1.0 500\n";
-            stick_x = x; stick_y = y;
-            stick_until = now_ms() + ms;
+            if (!(in >> x >> y >> ms)) return "ERR usage: stick|rstick 0.0 1.0 500\n";
+            Stick& stick = command == "stick" ? left_stick : right_stick;
+            stick.x = x; stick.y = y;
+            stick.until = now_ms() + ms;
             return "OK\n";
         }
         if (command == "shot") {
@@ -172,7 +181,7 @@ namespace {
         }
         if (command == "cpu") return cpu_load();
         if (command == "exp") return "OK\n" + experiments + "END\n";
-        return "ERR commands: press stick shot peek status cpu exp\n";
+        return "ERR commands: press stick rstick shot peek status cpu exp\n";
     }
 
     void serve_client(int fd) {
@@ -229,17 +238,22 @@ extern "C" void dk64nx_remote_track_thread(const char* name, Handle handle) {
     threads.push_back({name, handle, 0, 0});
 }
 
-// Adds the remote buttons to the pad state and overrides the stick while a remote command is active.
-bool dk64nx_remote_apply(uint16_t* buttons, float* x, float* y) {
+// Adds the remote buttons to the pad and overrides its sticks while a remote command is active.
+bool dk64nx_remote_apply(NxPad* pad) {
     const uint64_t now = now_ms();
     bool active = false;
     if (now < buttons_until.load()) {
-        *buttons |= static_cast<uint16_t>(remote_buttons.load());
+        pad->buttons |= remote_buttons.load();
         active = true;
     }
-    if (now < stick_until.load()) {
-        *x = stick_x.load();
-        *y = stick_y.load();
+    if (now < left_stick.until.load()) {
+        pad->lx = left_stick.x.load();
+        pad->ly = left_stick.y.load();
+        active = true;
+    }
+    if (now < right_stick.until.load()) {
+        pad->rx = right_stick.x.load();
+        pad->ry = right_stick.y.load();
         active = true;
     }
     return active;

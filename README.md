@@ -78,18 +78,35 @@ Your saves are in `sdmc:/switch/dk64recomp/saves/`.
 | **C Buttons** | **Right Stick** (camera) |
 | **D-Pad** | **D-Pad** |
 
+Press **L3 + R3** (both sticks) during the game to open **NX Options**.
+
 # Settings
 
-There is no settings menu yet. The port uses these defaults:
+**NX Options** (L3 + R3) holds the PC version's options. Move with the D-Pad or the left stick, change a value
+with Left/Right or **A**, close with **B** or L3 + R3. The game does not react to the pad while the menu is open.
 
-| Setting | Value |
+| Section | Options |
 |---|---|
-| Aspect ratio | 16:9 (PC option *Expand*) |
-| HUD placement | Screen edges (PC option *Expand*) |
-| Resolution | 960×720 (3× native) |
-| Frame rate | Original (30 fps) |
-| Cutscene borders | Off |
-| Camera | Free camera on the right stick |
+| Camera | Camera type, analog camera sensitivity, invert camera, first person and swimming |
+| Game | Story skip, lightning flashes, cutscene borders, draw distance |
+| Audio | Music and sound effects volume |
+| Display | Show FPS, aspect ratio (16:9 or 4:3), resolution (2x or 3x) |
+| Performance | Frame rate (30 fps, or 60 fps experimental), clock profile |
+| System | Quit Game, back to the homebrew menu |
+
+**60 fps (experimental)** runs the game logic every screen refresh instead of every other one, as DK64 already
+does in Jetpac and the arcade. Some timers and mini-games may not keep their original speed. It needs more power
+than handheld mode's default clocks: use it docked, or with a clock profile and the 2x resolution.
+
+**Clock profile** raises the clocks in handheld mode only, while the game is in the foreground:
+*Docked GPU in Handheld* is the console's official docked GPU profile (768 MHz); *Horizon OC Docked Clocks*
+applies the docked CPU, GPU and RAM clocks set in [Horizon OC](https://github.com/Horizon-OC/Horizon-OC), if it
+is installed. Both are released when you leave the game.
+
+Changes apply immediately, except the aspect ratio and the resolution, which apply the next time the game
+starts. They are saved to `sdmc:/switch/dk64recomp/nx_options.txt` when the menu closes. By default the game
+runs at its original 30 fps, in 16:9 with the HUD at the screen edges, at 960x720 (3x native), without cutscene
+borders.
 
 # Troubleshooting
 
@@ -111,6 +128,7 @@ git clone https://github.com/Trinalord777/DK64Recomp-NX
 cd DK64Recomp-NX
 git submodule update --init --recursive lib/N64ModernRuntime lib/GLideN64 lib/dk64_decomp
 git submodule update --init lib/rt64
+git -C lib/rt64 submodule update --init src/contrib/imgui
 # 1. Recompile the game from your ROM (once per ROM, ~5 min)
 docker run --rm -v "$PWD:/work" -v "/path/to/rom/folder:/rom:ro" ubuntu:24.04 bash /work/switch/codegen.sh "/rom/Donkey Kong 64 (USA).z64"
 # 2. Build the .nro (~10 min the first time)
@@ -123,6 +141,13 @@ The result is `switch/build/dk64recomp.nro`. Nothing derived from the ROM is tra
 
 Start the Homebrew Menu, press **Y**, then run `nxlink -s switch/build/dk64recomp.nro` from
 devkitPro's `switch-tools`. The game's log streams to your terminal.
+
+### Remote test build
+
+`DK64NX_DEV=1 switch/build.sh` builds `switch/build-dev/dk64recomp.nro` with a test server on TCP port 28280
+that injects pad input, captures the screen and reads the game's memory, driven from your computer with
+`switch/dk64nx_remote.py`. It has no authentication: use it on your own network only. Release builds never
+include it.
 
 ### How it works
 

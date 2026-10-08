@@ -18,6 +18,7 @@
 
 #include "donk_config.h"
 #include "donk_game.h"
+#include "nx_settings.h"
 #include "librecomp/game.hpp"
 #include "librecomp/overlays.hpp"
 #include "librecomp/rsp.hpp"
@@ -39,6 +40,9 @@
 SDL_Window* dk64nx_window = nullptr;
 
 void dk64nx_input_handle_event(const SDL_Event& event);
+void dk64nx_perf_start();
+void dk64nx_perf_update();
+void dk64nx_perf_stop();
 #ifdef DK64NX_REMOTE
 void dk64nx_remote_start();
 #endif
@@ -125,8 +129,8 @@ namespace {
         return false;
     }
 
-    // Original framerate. Expand + Full HUD, as on PC: DK64R then sizes its UI and screen effects for the
-    // 16:9 window (recomp_get_ui_bounds = 426 wide), which GLideN64's adjust mode lays out like RT64.
+    // Original framerate. In 16:9, Expand + Full HUD, as on PC: DK64R then sizes its UI and screen effects for
+    // the 16:9 window (recomp_get_ui_bounds = 426 wide), which GLideN64's adjust mode lays out like RT64.
     void set_switch_graphics_config() {
         ultramodern::renderer::GraphicsConfig config{};
         config.developer_mode = false;
@@ -134,7 +138,8 @@ namespace {
         config.wm_option = ultramodern::renderer::WindowMode::Fullscreen;
         config.hr_option = ultramodern::renderer::HUDRatioMode::Full;
         config.api_option = ultramodern::renderer::GraphicsApi::Auto;
-        config.ar_option = ultramodern::renderer::AspectRatio::Expand;
+        config.ar_option = nx::widescreen() ? ultramodern::renderer::AspectRatio::Expand
+                                            : ultramodern::renderer::AspectRatio::Original;
         config.msaa_option = ultramodern::renderer::Antialiasing::None;
         config.rr_option = ultramodern::renderer::RefreshRate::Original;
         config.hpfb_option = ultramodern::renderer::HighPrecisionFramebuffer::Off;
@@ -170,6 +175,7 @@ namespace {
             }
             dk64nx_input_handle_event(event);
         }
+        dk64nx_perf_update();
     }
 
     RspUcodeFunc* get_rsp_microcode(const OSTask* task) {
@@ -294,6 +300,8 @@ int main(int argc, char** argv) {
     init_logging();
     printf("[DK64NX] DK64: Recompiled %s for Switch, applet type %d\n", VERSION_STRING.c_str(),
            static_cast<int>(appletGetAppletType()));
+    nx::load();
+    dk64nx_perf_start();
 #ifdef DK64NX_REMOTE
     dk64nx_remote_start();
 #endif
@@ -343,6 +351,7 @@ int main(int argc, char** argv) {
     REGISTER_FUNC(recomp_get_mp_enabled);
     REGISTER_FUNC(recomp_get_ui_bounds);
     REGISTER_FUNC(recomp_get_ui_pillar);
+    REGISTER_FUNC(recomp_nx_get_frame_vis);
     REGISTER_FUNC(recomp_get_gyro_deltas);
     REGISTER_FUNC(recomp_get_mouse_deltas);
     REGISTER_FUNC(recomp_get_inverted_axes);
@@ -425,6 +434,7 @@ int main(int argc, char** argv) {
     step("recomp::start");
     recomp::start(cfg);
     step("recomp::start returned");
+    dk64nx_perf_stop();
 
     SDL_Quit();
     socketExit();

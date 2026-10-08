@@ -1,5 +1,6 @@
 #include "common_structs.h"
 #include "debug_config.h"
+#include "misc_funcs.h"
 
 extern Gfx* handle_interpolation(Gfx * dl, interpolationIDs id, u8 decrement);
 
@@ -178,7 +179,8 @@ int getFrameDelta(void) {
         }
     }
     // Normal Gameplay
-    return 2;
+    // @nx: 1 in NX Options' experimental 60 fps mode.
+    return recomp_nx_get_frame_vis();
 }
 
 #if TIMING_DEBUG

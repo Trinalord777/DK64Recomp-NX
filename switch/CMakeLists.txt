@@ -88,6 +88,21 @@ target_compile_definitions(GLideN64 PRIVATE MUPENPLUSAPI TXFILTER_LIB OS_LINUX E
 set_target_properties(GLideN64 PROPERTIES CXX_STANDARD 17)
 target_compile_options(GLideN64 PRIVATE -Wno-narrowing $<$<COMPILE_LANGUAGE:CXX>:-fpermissive>)
 
+# NX Options menu (nx_menu.cpp): Dear ImGui at the version RT64 pins, with its OpenGL 3 backend; glad (a
+# devkitPro portlib) loads the GL functions.
+set(IMGUI_DIR ${ROOT}/lib/rt64/src/contrib/imgui)
+add_library(imgui STATIC
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
+)
+target_include_directories(imgui PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backends $ENV{DEVKITPRO}/portlibs/switch/include)
+target_compile_definitions(imgui PRIVATE IMGUI_IMPL_OPENGL_LOADER_CUSTOM)
+set_source_files_properties(${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp PROPERTIES COMPILE_OPTIONS "-include;glad/glad.h")
+target_link_libraries(imgui PUBLIC glad)
+
 add_executable(dk64recomp
     ${ROOT}/src/game/debug.cpp
     ${ROOT}/src/game/recomp_api.cpp
@@ -105,6 +120,9 @@ add_executable(dk64recomp
     threads_switch.c
     crash_switch.c
     render_gliden64.cpp
+    nx_settings.cpp
+    nx_menu.cpp
+    perf_switch.cpp
 )
 if(DK64NX_REMOTE)
     target_sources(dk64recomp PRIVATE remote_switch.cpp experiments_switch.cpp)
@@ -126,6 +144,7 @@ set(CMAKE_CXX_LINK_GROUP_USING_RESCAN_SUPPORTED TRUE)
 target_link_libraries(dk64recomp PRIVATE
     "$<LINK_GROUP:RESCAN,PatchesLib,RecompiledFuncs,librecomp,ultramodern>"
     GLideN64
+    imgui
     SDL2::SDL2
     EGL
     GLESv2

@@ -8,5 +8,7 @@ DECLARE_FUNC(void, recomp_puts, const char* data, u32 size);
 DECLARE_FUNC(void, recomp_exit);
 DECLARE_FUNC(f32, sqrtf_recomp, f32);
 DECLARE_FUNC(void, memcpy_recomp, void *, const void *, u32);
+// @nx: VIs per game frame chosen in NX Options (2 = 30 fps as in the original, 1 = 60 fps).
+DECLARE_FUNC(s32, recomp_nx_get_frame_vis);
 
 #endif

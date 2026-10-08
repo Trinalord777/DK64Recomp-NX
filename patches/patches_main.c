@@ -1,6 +1,7 @@
 #include "common_structs.h"
 #include "patches_main.h"
 #include "ui.h"
+#include "misc_funcs.h"
 
 #define gScissorUpLX D_global_asm_80744498
 #define gScissorUpLY D_global_asm_8074449C
@@ -86,7 +87,8 @@ extern int gameIsInDKTVMode(void);
 void updateLag(s32 value) {
     s32 limit = 1;
     if ((is_cutscene_active != 3) && (is_cutscene_active != 4)) {
-        limit = 2;
+        // @nx: 1 in NX Options' experimental 60 fps mode.
+        limit = recomp_nx_get_frame_vis();
     }
     if (value < limit) {
         value = limit;
@@ -112,8 +114,9 @@ RECOMP_PATCH void func_global_asm_80600674(void) {
 
     //@recomp: patch to always greater than 1 (on console, default is 2. if zero, it will divide by zero and crash)
 
-    if (D_global_asm_80744478 <= 1) {
-        D_global_asm_80744478 = 2;
+    // @nx: never below the frame VIs (1 in NX Options' experimental 60 fps mode, otherwise 2).
+    if (D_global_asm_80744478 < recomp_nx_get_frame_vis()) {
+        D_global_asm_80744478 = recomp_nx_get_frame_vis();
     }
 
     if ((gameIsInDKTVMode()) && (current_map == MAP_JAPES)) {

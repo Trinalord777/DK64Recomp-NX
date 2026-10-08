@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """Client for the DK64NX_REMOTE test harness (switch/remote_switch.cpp), port 28280.
 
+Buttons are the Switch ones (A B X Y L R ZL ZR PLUS MINUS UP DOWN LEFT RIGHT LS RS), held for the given
+milliseconds; the sticks take x y in [-1, 1], y up.
+
 Examples
 --------
     dk64nx_remote.py --host 172.22.22.99 status
+    dk64nx_remote.py press LS+RS 200        # open the NX Options menu
     dk64nx_remote.py press A 200
     dk64nx_remote.py stick 0 1 1500
+    dk64nx_remote.py rstick 1 0 300
     dk64nx_remote.py shot capture.png
     dk64nx_remote.py peek 8076A0A8 1
     dk64nx_remote.py exp
@@ -65,7 +70,7 @@ def write_png(path: Path, width: int, height: int, rgba_bottom_up: bytes) -> Non
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--host", default="172.22.22.99")
-    parser.add_argument("command", nargs="+", help="press|stick|shot|peek|status|cpu|exp and its arguments")
+    parser.add_argument("command", nargs="+", help="press|stick|rstick|shot|peek|status|cpu|exp and its arguments")
     args = parser.parse_args()
 
     with socket.create_connection((args.host, PORT), timeout=10) as sock:

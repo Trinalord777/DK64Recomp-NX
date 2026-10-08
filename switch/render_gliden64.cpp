@@ -13,6 +13,7 @@
 #include "m64p_plugin.h"
 
 #include "librecomp/addresses.hpp"
+#include "nx_settings.h"
 #include "ultramodern/renderer_context.hpp"
 
 void dk64nx_seed_gliden64_config();
@@ -172,7 +173,7 @@ namespace {
         }
 
         uint32_t get_display_framerate() const override { return 60; }
-        float get_resolution_scale() const override { return 3.0f; }
+        float get_resolution_scale() const override { return static_cast<float>(nx::resolution_factor()); }
 
     private:
 

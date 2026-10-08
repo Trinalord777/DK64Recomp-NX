@@ -1,12 +1,12 @@
 // Switch replacements for the recompui calls and the dk64 config getters.
-// The PC port reads these options from RmlUi menus; here they are the upstream defaults
-// (src/game/config.cpp), so the game behaves like a fresh PC install.
+// The PC port reads these options from RmlUi menus; here they come from the NX Options menu (nx_settings.cpp).
 #include <cstdio>
 
 #include <SDL.h>
 #include <switch.h>
 
 #include "donk_config.h"
+#include "nx_settings.h"
 #include "recomp.h"
 #include "donk_draw.h"
 #include "donk_sound.h"
@@ -39,22 +39,27 @@ void dk64::init_config() {}
 
 void dk64::open_quit_game_prompt() {}
 
-dk64::CameraInvertMode dk64::get_camera_invert_mode() { return CameraInvertMode::InvertNone; }
-dk64::CameraInvertMode dk64::get_third_person_camera_mode() { return CameraInvertMode::InvertNone; }
-dk64::CameraInvertMode dk64::get_swimming_invert_mode() { return CameraInvertMode::InvertY; }
-dk64::CameraInvertMode dk64::get_first_person_invert_mode() { return CameraInvertMode::InvertY; }
+namespace {
+    template <typename T>
+    T setting(nx::Setting id) { return static_cast<T>(nx::get(id)); }
+}
+
+// Both third person camera getters follow Invert Camera, as the PC menu shows a single option.
+dk64::CameraInvertMode dk64::get_camera_invert_mode() { return setting<CameraInvertMode>(nx::Setting::InvertCamera); }
+dk64::CameraInvertMode dk64::get_third_person_camera_mode() { return setting<CameraInvertMode>(nx::Setting::InvertCamera); }
+dk64::CameraInvertMode dk64::get_swimming_invert_mode() { return setting<CameraInvertMode>(nx::Setting::InvertSwimming); }
+dk64::CameraInvertMode dk64::get_first_person_invert_mode() { return setting<CameraInvertMode>(nx::Setting::InvertFirstPerson); }
 dk64::CameraInvertMode dk64::get_gyro_invert_mode() { return CameraInvertMode::InvertY; }
 dk64::CameraInvertMode dk64::get_mouse_invert_mode() { return CameraInvertMode::InvertY; }
-uint32_t dk64::get_analog_cam_sensitivity() { return 3; }
-dk64::StorySkipMode dk64::get_story_skip() { return StorySkipMode::Off; }
-dk64::CameraTypeMode dk64::get_camera_type() { return CameraTypeMode::Free; }
-dk64::LightningFlashMode dk64::get_lightning_flash() { return LightningFlashMode::Reduced; }
-// Off: no letterbox in cutscenes, the 16:9 image fills the screen (JT's request).
-dk64::CutsceneBordersMode dk64::get_cutscene_borders() { return CutsceneBordersMode::Off; }
+uint32_t dk64::get_analog_cam_sensitivity() { return setting<uint32_t>(nx::Setting::CameraSensitivity); }
+dk64::StorySkipMode dk64::get_story_skip() { return setting<StorySkipMode>(nx::Setting::StorySkip); }
+dk64::CameraTypeMode dk64::get_camera_type() { return setting<CameraTypeMode>(nx::Setting::CameraType); }
+dk64::LightningFlashMode dk64::get_lightning_flash() { return setting<LightningFlashMode>(nx::Setting::LightningFlashes); }
+dk64::CutsceneBordersMode dk64::get_cutscene_borders() { return setting<CutsceneBordersMode>(nx::Setting::CutsceneBorders); }
 dk64::MultiplayerEnabled dk64::get_multiplayer_enabled() { return MultiplayerEnabled::Off; }
-int dk64::get_bgm_volume() { return 100; }
-int dk64::get_sfx_volume() { return 100; }
-int dk64::get_draw_distance() { return 0; }
+int dk64::get_bgm_volume() { return nx::get(nx::Setting::MusicVolume); }
+int dk64::get_sfx_volume() { return nx::get(nx::Setting::SoundVolume); }
+int dk64::get_draw_distance() { return nx::get(nx::Setting::DrawDistance); }
 
 // Pumps RmlUi callbacks registered by mods; there is no UI (nor mods) on Switch.
 extern "C" void recomp_run_ui_callbacks(uint8_t*, recomp_context*) {}
