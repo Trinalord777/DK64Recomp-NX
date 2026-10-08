@@ -90,16 +90,29 @@ void dk64nx_input_handle_event(const SDL_Event& event) {
     }
 }
 
+#ifdef DK64NX_REMOTE
+bool dk64nx_remote_apply(uint16_t* buttons, float* x, float* y);
+#endif
+
 bool dk64nx_get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
-    SDL_GameController* controller = pad.load();
-    if (controller_num != 0 || controller == nullptr) {
+    if (controller_num != 0) {
         return false;
     }
-    *buttons = read_buttons(controller);
-    *x = read_axis(controller, SDL_CONTROLLER_AXIS_LEFTX);
-    // SDL's Y axis points down, the N64's points up.
-    *y = -read_axis(controller, SDL_CONTROLLER_AXIS_LEFTY);
-    return true;
+    SDL_GameController* controller = pad.load();
+    bool connected = controller != nullptr;
+    *buttons = 0;
+    *x = 0.0f;
+    *y = 0.0f;
+    if (connected) {
+        *buttons = read_buttons(controller);
+        *x = read_axis(controller, SDL_CONTROLLER_AXIS_LEFTX);
+        // SDL's Y axis points down, the N64's points up.
+        *y = -read_axis(controller, SDL_CONTROLLER_AXIS_LEFTY);
+    }
+#ifdef DK64NX_REMOTE
+    connected = dk64nx_remote_apply(buttons, x, y) || connected;
+#endif
+    return connected;
 }
 
 ultramodern::input::connected_device_info_t dk64nx_get_connected_device_info(int controller_num) {

@@ -60,7 +60,14 @@ static int core_for(const char* name) {
     return -1;
 }
 
+#ifdef DK64NX_REMOTE
+void dk64nx_remote_track_thread(const char* name, Handle handle);
+#endif
+
 void dk64nx_place_thread(const char* name) {
+#ifdef DK64NX_REMOTE
+    dk64nx_remote_track_thread(name, threadGetCurHandle());
+#endif
     int core = core_for(name);
     if (core >= 0) {
         svcSetThreadCoreMask(CUR_THREAD_HANDLE, core, 1u << core);

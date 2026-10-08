@@ -39,6 +39,9 @@
 SDL_Window* dk64nx_window = nullptr;
 
 void dk64nx_input_handle_event(const SDL_Event& event);
+#ifdef DK64NX_REMOTE
+void dk64nx_remote_start();
+#endif
 bool dk64nx_get_input(int controller_num, uint16_t* buttons, float* x, float* y);
 ultramodern::input::connected_device_info_t dk64nx_get_connected_device_info(int controller_num);
 std::unique_ptr<ultramodern::renderer::RendererContext> dk64nx_create_render_context(
@@ -82,7 +85,9 @@ namespace {
             setvbuf(stderr, nullptr, _IONBF, 0);
             return;
         }
+#ifndef DK64NX_REMOTE
         socketExit();
+#endif
         // Launched from hbmenu: keep a log on the SD card instead.
         const std::string log_path = (DATA_DIR / "dk64recomp.log").string();
         freopen(log_path.c_str(), "w", stdout);
@@ -289,6 +294,9 @@ int main(int argc, char** argv) {
     init_logging();
     printf("[DK64NX] DK64: Recompiled %s for Switch, applet type %d\n", VERSION_STRING.c_str(),
            static_cast<int>(appletGetAppletType()));
+#ifdef DK64NX_REMOTE
+    dk64nx_remote_start();
+#endif
 
     recomp::Version project_version{};
     recomp::Version::from_string(VERSION_STRING, project_version);

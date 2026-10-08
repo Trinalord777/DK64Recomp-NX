@@ -16,6 +16,9 @@
 #include "ultramodern/renderer_context.hpp"
 
 void dk64nx_seed_gliden64_config();
+#ifdef DK64NX_REMOTE
+void dk64nx_remote_set_rdram(uint8_t* base);
+#endif
 bool dk64nx_front_buffer_redrawn(uint32_t origin);
 
 namespace {
@@ -60,6 +63,9 @@ namespace {
         explicit GLideN64RendererContext(uint8_t* rdram) {
             chosen_api = ultramodern::renderer::GraphicsApi::Auto;
             dk64nx_seed_gliden64_config();
+#ifdef DK64NX_REMOTE
+            dk64nx_remote_set_rdram(rdram);
+#endif
             build_rom_header();
 
             if (PluginStartup(nullptr, nullptr, debug_callback) != M64ERR_SUCCESS) {

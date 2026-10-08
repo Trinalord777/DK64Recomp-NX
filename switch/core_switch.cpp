@@ -250,7 +250,14 @@ m64p_error nx_VidExt_GL_GetAttribute(m64p_GLattr attr, int* value) {
     return SDL_GL_GetAttribute(sdl_attr, value) == 0 ? M64ERR_SUCCESS : M64ERR_SYSTEM_FAIL;
 }
 
+#ifdef DK64NX_REMOTE
+void dk64nx_remote_on_swap(int width, int height);
+#endif
+
 m64p_error nx_VidExt_GL_SwapBuffers(void) {
+#ifdef DK64NX_REMOTE
+    dk64nx_remote_on_swap(SCREEN_WIDTH, SCREEN_HEIGHT);
+#endif
     SDL_GL_SwapWindow(dk64nx_window);
     return M64ERR_SUCCESS;
 }

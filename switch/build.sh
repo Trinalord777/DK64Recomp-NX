@@ -31,9 +31,18 @@ Path("RecompiledPatches/patches_bin.c").write_text(
     "const size_t bk_patches_bin_size = sizeof(bk_patches_bin);\n")
 PY
 
-docker run --rm -v "$PWD:$PWD" -w "$PWD/switch" devkitpro/devkita64:latest bash -c '
+# DK64NX_DEV=1 builds the remote test harness into switch/build-dev, a separate tree so a release build
+# (switch/build) can never pick it up.
+BUILD_DIR=build
+EXTRA_ARGS=""
+if [ "${DK64NX_DEV:-0}" = 1 ]; then
+    BUILD_DIR=build-dev
+    EXTRA_ARGS="-DDK64NX_REMOTE=ON"
+fi
+
+docker run --rm -e BUILD_DIR="$BUILD_DIR" -e EXTRA_ARGS="$EXTRA_ARGS" -v "$PWD:$PWD" -w "$PWD/switch" devkitpro/devkita64:latest bash -c '
     set -euo pipefail
-    /opt/devkitpro/portlibs/switch/bin/aarch64-none-elf-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-    cmake --build build -j"$(nproc)"
+    /opt/devkitpro/portlibs/switch/bin/aarch64-none-elf-cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release $EXTRA_ARGS
+    cmake --build "$BUILD_DIR" -j"$(nproc)"
 '
-ls -la switch/build/dk64recomp.nro
+ls -la "switch/$BUILD_DIR/dk64recomp.nro"

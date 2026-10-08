@@ -61,6 +61,8 @@ target_compile_options(PatchesLib PRIVATE ${RECOMP_C_FLAGS})
 
 # GLideN64 as the renderer: mupen64plus plugin API, desktop GL through mesa/EGL (like
 # mupen64plus-libretro-nx on Switch), no texture packs (NOHQ) and no OSD font (NO_OSD).
+# Developer test harness (switch/remote_switch.cpp): TCP remote control with no authentication.
+option(DK64NX_REMOTE "Remote test harness and startup experiments (never in releases)" OFF)
 set(GLIDEN64_DIR ${ROOT}/lib/GLideN64/src)
 include(gliden64_sources.cmake)
 # The ARM64 setup Android builds use: hardware CRC32 for texture hashing, NEON for matrices and
@@ -104,6 +106,10 @@ add_executable(dk64recomp
     crash_switch.c
     render_gliden64.cpp
 )
+if(DK64NX_REMOTE)
+    target_sources(dk64recomp PRIVATE remote_switch.cpp experiments_switch.cpp)
+    target_compile_definitions(dk64recomp PRIVATE DK64NX_REMOTE=1)
+endif()
 target_include_directories(dk64recomp PRIVATE
     ${RECOMP_INCLUDES}
     ${ROOT}/lib/N64ModernRuntime/thirdparty/sse2neon
