@@ -50,7 +50,12 @@ void __appInit(void) {
     fsdevMountSdmc();
     __libnx_init_cwd();
 
-    dk64nx_trace("boot: services up, opening the window");
+    // The homebrew loader runs each .nro in the same process: the process id tells instances of one process apart.
+    u64 pid = 0;
+    svcGetProcessId(&pid, CUR_PROCESS_HANDLE);
+    char line[64];
+    snprintf(line, sizeof(line), "boot: process %llu, services up, opening the window", (unsigned long long)pid);
+    dk64nx_trace(line);
     if (&__nx_win_init) __nx_win_init();
     dk64nx_trace("boot: window open");
 }
