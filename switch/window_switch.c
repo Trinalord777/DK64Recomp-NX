@@ -7,8 +7,9 @@
 
 // The first instance in a process takes the vsync event; a later .nro of the same process (Restart Game, or the game
 // started again from sphaira) does not ask vi again: the console crashed once right after such a second request
-// (2026-10-09; the same crash later came without it, so the request may be innocent). The marker names the process
-// by its id and the base of its heap region: ids repeat after a reboot, the randomized heap base does not.
+// (2026-10-09; the same crash later came without it). Asking again anyway after a Restart, the same evening, got the
+// event (0x0) but left the game unresponsive. The marker names the process by its id and the base of its heap
+// region: ids repeat after a reboot, the randomized heap base does not.
 #define VSYNC_MARKER "sdmc:/switch/dk64recomp/.vsync_process"
 
 static ViDisplay g_viDisplay;
