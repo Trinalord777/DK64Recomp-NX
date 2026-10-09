@@ -250,10 +250,13 @@ namespace {
 
     constexpr f32 CLOSE_TRANSLATION = 50.0f;  // world units the same object may move in one frame
     constexpr f32 CLOSE_ROTATION = 0.3f;      // largest change of a rotation/scale element
-    constexpr size_t MATRIX_COUNT_TOLERANCE = 10;  // percent; beyond, the previous frame is another scene
+    // A matrix looks for its twin this many ranks around the expected one: an object appearing or disappearing shifts
+    // every rank after it, and the search follows that shift.
+    constexpr size_t MATCH_WINDOW = 8;
 
     bool substituting = false;  // second pass: matrices are replaced by rank
     size_t substitute_rank = 0;
+    ptrdiff_t rank_shift = 0;   // previous rank - current rank of the last match
     bool camera_cut = false;
     u32 saved_address = 0;      // color buffer holding the two copies of the last interpolated frame
     FrameBuffer* saved_buffer = nullptr;
@@ -267,6 +270,8 @@ namespace {
         u64 far = 0;
         u64 count_changed = 0;
         u64 interpolated = 0;
+        u64 camera_cuts = 0;
+        u64 unmatched = 0;      // second-pass matrices left as they are
     } match_stats;
     std::mutex match_mutex;
 
@@ -296,8 +301,33 @@ namespace {
         }
     }
 
-    bool counts_similar(size_t a, size_t b) {
-        return a * 100 <= b * (100 + MATRIX_COUNT_TOLERANCE) && b * 100 <= a * (100 + MATRIX_COUNT_TOLERANCE);
+    f32 distance(const LoadedMatrix& a, const LoadedMatrix& b) {
+        f32 total = 0.0f;
+        for (int r = 0; r < 4; r++) {
+            for (int c = 0; c < 4; c++) total += std::fabs(a.m[r][c] - b.m[r][c]);
+        }
+        return total;
+    }
+
+    // The previous frame's twin of the current frame's matrix of this rank, or -1.
+    ptrdiff_t find_twin(size_t rank) {
+        const LoadedMatrix& now = matrices_current[rank];
+        const ptrdiff_t expected = static_cast<ptrdiff_t>(rank) + rank_shift;
+        const ptrdiff_t first = std::max<ptrdiff_t>(0, expected - static_cast<ptrdiff_t>(MATCH_WINDOW));
+        const ptrdiff_t last = std::min<ptrdiff_t>(static_cast<ptrdiff_t>(matrices_previous.size()) - 1,
+                                                   expected + static_cast<ptrdiff_t>(MATCH_WINDOW));
+        ptrdiff_t best = -1;
+        f32 best_distance = 0.0f;
+        for (ptrdiff_t j = first; j <= last; j++) {
+            const LoadedMatrix& before = matrices_previous[j];
+            if (!same_object(before, now)) continue;
+            const f32 d = distance(before, now);
+            if (best < 0 || d < best_distance) {
+                best = j;
+                best_distance = d;
+            }
+        }
+        return best;
     }
 
     FrameBuffer* saved_frame() {
@@ -314,10 +344,16 @@ void RT64EX_OnMatrix(u32 address, u8 param, f32 mtx[4][4]) {
         return;
     }
     const size_t rank = substitute_rank++;
-    if (rank >= matrices_previous.size() || rank >= matrices_current.size()) return;
-    const LoadedMatrix& before = matrices_previous[rank];
+    if (rank >= matrices_current.size()) return;
+    const ptrdiff_t twin = find_twin(rank);
+    if (twin < 0) {
+        std::lock_guard lock{match_mutex};
+        match_stats.unmatched++;
+        return;
+    }
+    rank_shift = twin - static_cast<ptrdiff_t>(rank);
+    const LoadedMatrix& before = matrices_previous[twin];
     const LoadedMatrix& now = matrices_current[rank];
-    if (!same_object(before, now)) return;
     for (int r = 0; r < 4; r++) {
         for (int c = 0; c < 4; c++) mtx[r][c] = 0.5f * (before.m[r][c] + now.m[r][c]);
     }
@@ -342,15 +378,18 @@ extern "C" void dk64nx_interp_frame_begin() {
 // After the first pass. False when this frame gets no in-between image.
 extern "C" bool dk64nx_interp_begin_second_pass() {
     FrameBuffer* buffer = frameBufferList().getCurrent();
-    if (camera_cut || matrices_previous.empty() || buffer == nullptr || config.video.multisampling != 0 ||
-        !counts_similar(matrices_previous.size(), matrices_current.size())) {
+    if (camera_cut) {
+        std::lock_guard lock{match_mutex};
+        match_stats.camera_cuts++;
         return false;
     }
+    if (matrices_previous.empty() || buffer == nullptr || config.video.multisampling != 0) return false;
     buffer->interpCopy(0, true);
     saved_buffer = buffer;
     saved_address = buffer->m_startAddress;
     substituting = true;
     substitute_rank = 0;
+    rank_shift = 0;
     return true;
 }
 
@@ -390,8 +429,9 @@ extern "C" int dk64nx_interp_stats(char* out, int size) {
     const MatchStats s = match_stats;
     match_stats = {};
     const double pairs = static_cast<double>(s.equal + s.close + s.far);
-    return snprintf(out, size, "frames=%llu interpolated=%llu matrices/frame=%.0f equal=%.1f%% close=%.1f%% far=%.1f%% count_changed=%llu",
-                    (unsigned long long)s.frames, (unsigned long long)s.interpolated,
+    return snprintf(out, size, "frames=%llu interpolated=%llu cuts=%llu unmatched/frame=%.1f matrices/frame=%.0f equal=%.1f%% close=%.1f%% far=%.1f%% count_changed=%llu",
+                    (unsigned long long)s.frames, (unsigned long long)s.interpolated, (unsigned long long)s.camera_cuts,
+                    s.interpolated ? double(s.unmatched) / s.interpolated : 0.0,
                     s.frames ? double(s.matrices) / s.frames : 0.0,
                     pairs ? 100.0 * s.equal / pairs : 0.0, pairs ? 100.0 * s.close / pairs : 0.0,
                     pairs ? 100.0 * s.far / pairs : 0.0, (unsigned long long)s.count_changed);
