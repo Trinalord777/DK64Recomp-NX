@@ -220,7 +220,26 @@ void RT64EX_AdjustRectX(f32* xs, u32 count, f32 scale, f32 width) {
 // Changes a GLideN64 setting while the game runs: the frame rate option (core_switch.cpp) and the developer
 // harness ("gl" command, to measure what a setting costs). Graphics thread for the former. Returns the previous
 // value, or -1 for an unknown name.
+// A projection (camera) matrix that changes more than this between two frames is a camera cut, which DK64R's patches
+// do not always mark (the DK Rap's shots): that frame gets no in-between image. Measured on the console (largest
+// element change per frame): turning the camera at full speed while running stays under 0.1 in rotation but reaches
+// 200-1000 in translation, which mixes the camera's position and rotation; the DK Rap's unmarked cuts go past 0.25 in
+// rotation. A translation of 200 counted 4 false cuts in 4 s of play (one frame at 30 fps each time). The dev
+// harness tunes them (gl cutrot <hundredths>, gl cuttrans <units>).
+static f32 cut_rotation = 0.25f;
+static f32 cut_translation = 5000.0f;
+
 extern "C" int dk64nx_gliden64_set(const char* name, int value) {
+    if (strcmp(name, "cutrot") == 0) {
+        const int previous = static_cast<int>(cut_rotation * 100.0f);
+        cut_rotation = value / 100.0f;
+        return previous;
+    }
+    if (strcmp(name, "cuttrans") == 0) {
+        const int previous = static_cast<int>(cut_translation);
+        cut_translation = static_cast<f32>(value);
+        return previous;
+    }
     struct Field { const char* name; u32* value; };
     const Field fields[] = {
         {"copy", &config.frameBufferEmulation.copyToRDRAM},
@@ -258,10 +277,16 @@ namespace {
     // A matrix looks for its twin this many ranks around the expected one: an object appearing or disappearing shifts
     // every rank after it, and the search follows that shift.
     constexpr size_t MATCH_WINDOW = 8;
-    // A projection (camera) matrix that changes more than this between two frames is a camera cut, which DK64R's
-    // patches do not always mark (the DK Rap's shots): that frame gets no in-between image.
-    constexpr f32 CUT_ROTATION = 0.25f;
-    constexpr f32 CUT_TRANSLATION = 200.0f;
+    // Histogram edges of the largest projection change per frame (mtx stats), to tell camera cuts from fast turns.
+    constexpr f32 ROTATION_EDGES[] = {0.05f, 0.1f, 0.25f, 0.5f, 1.0f};
+    constexpr f32 TRANSLATION_EDGES[] = {50.0f, 200.0f, 1000.0f, 5000.0f, 20000.0f};
+    constexpr size_t EDGE_COUNT = 5;
+
+    size_t bucket(const f32 (&edges)[EDGE_COUNT], f32 value) {
+        size_t i = 0;
+        while (i < EDGE_COUNT && value >= edges[i]) i++;
+        return i;
+    }
 
     bool substituting = false;  // second pass: matrices are replaced by rank
     size_t substitute_rank = 0;
@@ -281,6 +306,8 @@ namespace {
         u64 interpolated = 0;
         u64 camera_cuts = 0;
         u64 unmatched = 0;      // second-pass matrices left as they are
+        u64 projection_rotation[EDGE_COUNT + 1] = {};
+        u64 projection_translation[EDGE_COUNT + 1] = {};
     } match_stats;
     std::mutex match_mutex;
 
@@ -330,20 +357,23 @@ namespace {
     bool camera_jumped() {
         size_t before = 0;
         size_t now = 0;
+        f32 translation = 0.0f;
+        f32 rotation = 0.0f;
         while (true) {
             while (before < matrices_previous.size() && !(matrices_previous[before].param & G_MTX_PROJECTION)) before++;
             while (now < matrices_current.size() && !(matrices_current[now].param & G_MTX_PROJECTION)) now++;
-            if (before >= matrices_previous.size() || now >= matrices_current.size()) return false;
+            if (before >= matrices_previous.size() || now >= matrices_current.size()) break;
             const LoadedMatrix& a = matrices_previous[before++];
             const LoadedMatrix& b = matrices_current[now++];
-            f32 translation = 0.0f;
-            f32 rotation = 0.0f;
             for (int r = 0; r < 3; r++) {
                 translation = std::max(translation, std::fabs(a.m[3][r] - b.m[3][r]));
                 for (int c = 0; c < 3; c++) rotation = std::max(rotation, std::fabs(a.m[r][c] - b.m[r][c]));
             }
-            if (rotation > CUT_ROTATION || translation > CUT_TRANSLATION) return true;
         }
+        std::lock_guard lock{match_mutex};
+        match_stats.projection_rotation[bucket(ROTATION_EDGES, rotation)]++;
+        match_stats.projection_translation[bucket(TRANSLATION_EDGES, translation)]++;
+        return rotation > cut_rotation || translation > cut_translation;
     }
 
     FrameBuffer* saved_frame() {
@@ -394,7 +424,8 @@ extern "C" void dk64nx_interp_frame_begin() {
 // After the first pass. False when this frame gets no in-between image.
 extern "C" bool dk64nx_interp_begin_second_pass() {
     FrameBuffer* buffer = frameBufferList().getCurrent();
-    if (camera_cut || camera_jumped()) {
+    const bool jumped = camera_jumped();  // always measured, for the histograms
+    if (camera_cut || jumped) {
         std::lock_guard lock{match_mutex};
         match_stats.camera_cuts++;
         return false;
@@ -488,10 +519,20 @@ extern "C" int dk64nx_interp_stats(char* out, int size) {
     const MatchStats s = match_stats;
     match_stats = {};
     const double pairs = static_cast<double>(s.equal + s.close + s.far);
-    return snprintf(out, size, "frames=%llu interpolated=%llu cuts=%llu unmatched/frame=%.1f matrices/frame=%.0f equal=%.1f%% close=%.1f%% far=%.1f%% count_changed=%llu",
+    char rotation[96];
+    char translation[96];
+    snprintf(rotation, sizeof(rotation), "%llu/%llu/%llu/%llu/%llu/%llu",
+             (unsigned long long)s.projection_rotation[0], (unsigned long long)s.projection_rotation[1],
+             (unsigned long long)s.projection_rotation[2], (unsigned long long)s.projection_rotation[3],
+             (unsigned long long)s.projection_rotation[4], (unsigned long long)s.projection_rotation[5]);
+    snprintf(translation, sizeof(translation), "%llu/%llu/%llu/%llu/%llu/%llu",
+             (unsigned long long)s.projection_translation[0], (unsigned long long)s.projection_translation[1],
+             (unsigned long long)s.projection_translation[2], (unsigned long long)s.projection_translation[3],
+             (unsigned long long)s.projection_translation[4], (unsigned long long)s.projection_translation[5]);
+    return snprintf(out, size, "frames=%llu interpolated=%llu cuts=%llu unmatched/frame=%.1f matrices/frame=%.0f equal=%.1f%% close=%.1f%% far=%.1f%% count_changed=%llu proj_rot(<.05/.1/.25/.5/1/more)=%s proj_trans(<50/200/1k/5k/20k/more)=%s",
                     (unsigned long long)s.frames, (unsigned long long)s.interpolated, (unsigned long long)s.camera_cuts,
                     s.interpolated ? double(s.unmatched) / s.interpolated : 0.0,
                     s.frames ? double(s.matrices) / s.frames : 0.0,
                     pairs ? 100.0 * s.equal / pairs : 0.0, pairs ? 100.0 * s.close / pairs : 0.0,
-                    pairs ? 100.0 * s.far / pairs : 0.0, (unsigned long long)s.count_changed);
+                    pairs ? 100.0 * s.far / pairs : 0.0, (unsigned long long)s.count_changed, rotation, translation);
 }

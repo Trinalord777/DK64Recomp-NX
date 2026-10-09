@@ -115,20 +115,6 @@ namespace {
         return out + "\n";
     }
 
-    // The end of this run's log, which FTP cannot read while the game keeps it open.
-    std::string log_tail() {
-        FILE* file = std::fopen("sdmc:/switch/dk64recomp/dk64recomp.log", "r");
-        if (file == nullptr) return "ERR no log\n";
-        std::fseek(file, 0, SEEK_END);
-        const long size = std::ftell(file);
-        const long start = size > 4000 ? size - 4000 : 0;
-        std::fseek(file, start, SEEK_SET);
-        std::string text(static_cast<size_t>(size - start), '\0');
-        text.resize(std::fread(text.data(), 1, text.size(), file));
-        std::fclose(file);
-        return "OK\n" + text + "\nEND\n";
-    }
-
     struct TrackedThread { std::string name; Handle handle; uint64_t last_ticks; uint64_t last_time; };
     std::mutex threads_mutex;
     std::vector<TrackedThread> threads;
@@ -280,7 +266,7 @@ namespace {
         if (command == "cpu") return cpu_load();
         if (command == "timing") return timing_report();
         if (command == "mtx") {
-            char out[256];
+            char out[512];
             dk64nx_interp_stats(out, sizeof(out));
             return std::string("OK ") + out + "\n";
         }
@@ -299,7 +285,6 @@ namespace {
             dk64nx_fast_swap_interval = value;
             return "OK previous=" + std::to_string(previous) + "\n";
         }
-        if (command == "log") return log_tail();
         return "ERR commands: press stick rstick shot peek setbits status cpu timing gl exp\n";
     }
 

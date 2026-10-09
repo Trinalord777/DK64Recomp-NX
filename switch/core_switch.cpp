@@ -251,9 +251,10 @@ m64p_error nx_VidExt_GL_GetAttribute(m64p_GLattr attr, int* value) {
     return SDL_GL_GetAttribute(sdl_attr, value) == 0 ? M64ERR_SUCCESS : M64ERR_SYSTEM_FAIL;
 }
 
-// Swap interval at 60 fps (interpolated). 0 never blocks the graphics thread; 1 waits for the vblank, which paces
-// presents to the display. The dev harness changes it (swap command) to measure both.
-int dk64nx_fast_swap_interval = 0;
+// Swap interval at 60 fps (interpolated). 1 paces presents to the display's vblank: in the title screen's gameplay
+// demo 76-87% of present intervals fell within 15.5-18 ms, against 61-62% with 0 (never blocking), at the same
+// ~62 presents a second. The dev harness changes it (swap command).
+int dk64nx_fast_swap_interval = 1;
 
 void dk64nx_menu_on_swap(int width, int height);
 int dk64nx_gliden64_set(const char* name, int value);
@@ -262,10 +263,9 @@ void dk64nx_remote_on_swap(int width, int height);
 #endif
 
 m64p_error nx_VidExt_GL_SwapBuffers(void) {
-    // At 60 fps each display list is processed twice and a frame is presented every VI. Two GLideN64 costs did not
-    // fit, on the graphics thread that also renders the next display list: the swap waiting for vblank, and the copy
-    // of each frame back to RDRAM (double-buffered read-back), which stalled ProcessDList for ~12 ms (20 ms -> 7.3 ms
-    // per pass in game). DK64's pause and transitions look the same without it. At 30 fps both stay as they were.
+    // At 60 fps each display list is processed twice and a frame is presented every VI. The copy of each frame back
+    // to RDRAM (double-buffered read-back) did not fit: it stalled ProcessDList for ~12 ms (20 ms -> 7.3 ms per pass
+    // in game). DK64's pause and transitions look the same without it. At 30 fps it stays as it was.
     static bool fast = false;
     static int applied_interval = -1;
     const bool wants_fast = nx::interpolated_60();
