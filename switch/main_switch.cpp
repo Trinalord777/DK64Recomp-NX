@@ -46,6 +46,7 @@ void dk64nx_perf_update();
 void dk64nx_perf_stop();
 #ifdef DK64NX_REMOTE
 void dk64nx_remote_start();
+void dk64nx_remote_stop();
 #endif
 bool dk64nx_get_input(int controller_num, uint16_t* buttons, float* x, float* y);
 ultramodern::input::connected_device_info_t dk64nx_get_connected_device_info(int controller_num);
@@ -445,6 +446,9 @@ int main(int argc, char** argv) {
     step("recomp::start");
     recomp::start(cfg);
     step("recomp::start returned");
+#ifdef DK64NX_REMOTE
+    dk64nx_remote_stop();
+#endif
     dk64nx_perf_stop();
 
     SDL_Quit();

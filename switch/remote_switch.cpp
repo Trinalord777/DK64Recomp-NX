@@ -254,8 +254,9 @@ namespace {
         return "ERR commands: press stick rstick shot peek setbits status cpu timing gl exp\n";
     }
 
-    // The process exit stops the server (stop_server): libnx tears the sockets down afterwards, and a thread still
-    // blocked in accept() then crashed every Quit/Restart Game. So the server only blocks POLL_MS at a time.
+    // main stops the server (dk64nx_remote_stop) before socketExit: a thread still inside a socket call afterwards
+    // dereferences the freed socket table (_socketGetFd) and crashed every Quit/Restart Game. So the server only
+    // blocks POLL_MS at a time.
     constexpr int POLL_MS = 200;
     std::atomic<bool> stopping{false};
     std::thread server_thread;
@@ -308,17 +309,17 @@ namespace {
         close(listener);
     }
 
-    void stop_server() {
-        stopping = true;
-        if (server_thread.joinable()) server_thread.join();
-    }
+}
+
+void dk64nx_remote_stop() {
+    stopping = true;
+    if (server_thread.joinable()) server_thread.join();
 }
 
 void dk64nx_remote_start() {
     experiments = dk64nx_run_experiments();
     std::fputs(experiments.c_str(), stdout);
     server_thread = std::thread(server_loop);
-    std::atexit(stop_server);
 }
 
 void dk64nx_remote_time(int kind, uint64_t start_tick) {
