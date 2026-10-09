@@ -13,6 +13,11 @@ extern "C" Event* dk64nx_vsync_event(Result* rc_out);  // window_switch.c
 // What paces the VIs, for the NX Options performance overlay.
 std::atomic<bool> dk64nx_vsync_paced{false};
 
+// Ticks of the last vblanks (dev harness frames command: what the display shows, from the presents).
+constexpr int VBLANK_RING = 512;
+uint64_t dk64nx_vblank_ring[VBLANK_RING];
+std::atomic<uint32_t> dk64nx_vblank_count{0};
+
 namespace {
     constexpr u64 VSYNC_TIMEOUT_NS = 50'000'000;  // a missed vblank must not stall the game
 
@@ -32,6 +37,11 @@ extern "C" bool dk64nx_wait_vsync() {
         std::printf("[DK64NX] VI pacing at 60 fps: %s (rc 0x%x)\n", vsync != nullptr ? "display vsync" : "timer", rc);
     }
     const bool paced = vsync != nullptr && R_SUCCEEDED(eventWait(vsync, VSYNC_TIMEOUT_NS));
+    if (paced) {
+        const uint32_t index = dk64nx_vblank_count.load();
+        dk64nx_vblank_ring[index % VBLANK_RING] = armGetSystemTick();
+        dk64nx_vblank_count = index + 1;
+    }
     dk64nx_vsync_paced = paced;
     return paced;
 }

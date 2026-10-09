@@ -8,6 +8,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <cstdio>
@@ -29,6 +30,8 @@ std::string dk64nx_run_experiments();
 extern "C" int dk64nx_gliden64_set(const char* name, int value);
 extern int dk64nx_fast_swap_interval;  // core_switch.cpp
 extern "C" void dk64nx_menu_request_restart();  // nx_menu.cpp
+extern uint64_t dk64nx_vblank_ring[];                // vsync_switch.cpp, 512 entries
+extern std::atomic<uint32_t> dk64nx_vblank_count;
 // Screen updates the graphics thread skipped because a newer one was already queued, since the start (events.cpp).
 extern std::atomic<int> dk64nx_dropped_screen_updates;
 extern "C" int dk64nx_interp_stats(char* out, int size);
@@ -105,8 +108,16 @@ namespace {
     std::atomic<uint64_t> pace_counts[7];
     uint64_t last_present_tick = 0;  // graphics thread only
 
+    // Ticks of the last presents, next to the vblanks of vsync_switch.cpp (frames command).
+    constexpr int PRESENT_RING = 512;
+    uint64_t present_ring[PRESENT_RING];
+    std::atomic<uint32_t> present_count{0};
+
     void count_present_interval() {
         const uint64_t now = armGetSystemTick();
+        const uint32_t index = present_count.load();
+        present_ring[index % PRESENT_RING] = now;
+        present_count = index + 1;
         if (last_present_tick != 0) {
             const uint64_t us = armTicksToNs(now - last_present_tick) / 1000;
             size_t bucket = 0;
@@ -114,6 +125,24 @@ namespace {
             pace_counts[bucket]++;
         }
         last_present_tick = now;
+    }
+
+    // The last 300 vblanks and presents, in microseconds since the first of them: "OK v=... p=...".
+    std::string frames_report() {
+        constexpr int COUNT = 300;
+        const uint32_t vblanks = dk64nx_vblank_count.load();
+        const uint32_t presents = present_count.load();
+        if (vblanks < COUNT || presents < COUNT) return "ERR not enough vblanks or presents (vsync pacing on?)\n";
+        const uint64_t origin = std::min(dk64nx_vblank_ring[(vblanks - COUNT) % 512], present_ring[(presents - COUNT) % PRESENT_RING]);
+        std::string out = "OK v=";
+        for (uint32_t i = vblanks - COUNT; i < vblanks; i++) {
+            out += std::to_string(armTicksToNs(dk64nx_vblank_ring[i % 512] - origin) / 1000) + ",";
+        }
+        out += " p=";
+        for (uint32_t i = presents - COUNT; i < presents; i++) {
+            out += std::to_string(armTicksToNs(present_ring[i % PRESENT_RING] - origin) / 1000) + ",";
+        }
+        return out + "\n";
     }
 
     std::string pace_report() {
@@ -287,6 +316,7 @@ namespace {
         }
         if (command == "exp") return "OK\n" + experiments + "END\n";
         if (command == "pace") return pace_report();
+        if (command == "frames") return frames_report();
         if (command == "clocks") return "OK " + nx::dev::read_clocks() + "\n";
         if (command == "restart") {
             dk64nx_menu_request_restart();
