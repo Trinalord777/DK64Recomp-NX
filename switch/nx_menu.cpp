@@ -16,6 +16,7 @@
 #include <switch.h>
 
 #include "imgui.h"
+#include "imgui_internal.h"  // RenderTextEllipsis
 #include "librecomp/mods.hpp"
 #include "imgui_impl_opengl3.h"
 #include "nx_cheats.h"
@@ -31,6 +32,14 @@ namespace {
 
     // Read when the menu opens; mods load when the game starts, so a change needs a restart.
     std::vector<recomp::mods::ModDetails> mods;
+    // One row per mod, then one per option of its config schema (Enum, Number and Bool options).
+    struct ModRow {
+        size_t mod;
+        int option;  // -1: the mod itself
+    };
+    std::vector<ModRow> mod_rows;
+    std::vector<const recomp::config::ConfigSchema*> mod_schemas;
+    std::string mod_label;
     std::map<std::string, bool> mod_enabled_at_start;
     std::string mod_description;
     constexpr uint32_t TOGGLE = NX_MINUS | NX_PLUS;
@@ -69,7 +78,7 @@ namespace {
 
     // The left stick acts as the D-pad along its dominant axis only (a diagonal would move and change a value at
     // once), pressed past STICK_PRESS and released below STICK_RELEASE.
-    int mod_count() { return static_cast<int>(mods.size()); }
+    int mod_count() { return static_cast<int>(mod_rows.size()); }
     int row_count() { return SETTING_COUNT + mod_count() + nx::cheats::count() + 1; }
     bool is_quit(int row) { return row == row_count() - 1; }
     bool is_mod(int row) { return row >= SETTING_COUNT && row < SETTING_COUNT + mod_count(); }
@@ -78,9 +87,66 @@ namespace {
     int cheat_index(int row) { return row - SETTING_COUNT - mod_count(); }
 
     void refresh_mods() {
+        using recomp::config::ConfigOptionType;
         mods = recomp::mods::get_all_mod_details(MOD_GAME_ID);
-        for (const recomp::mods::ModDetails& mod : mods) {
-            mod_enabled_at_start.try_emplace(mod.mod_id, recomp::mods::is_mod_enabled(mod.mod_id));
+        mod_rows.clear();
+        mod_schemas.clear();
+        for (size_t mod = 0; mod < mods.size(); mod++) {
+            mod_enabled_at_start.try_emplace(mods[mod].mod_id, recomp::mods::is_mod_enabled(mods[mod].mod_id));
+            const recomp::config::ConfigSchema& schema = recomp::mods::get_mod_config_schema(mods[mod].mod_id);
+            mod_schemas.push_back(&schema);
+            mod_rows.push_back({mod, -1});
+            for (size_t option = 0; option < schema.options.size(); option++) {
+                const ConfigOptionType type = schema.options[option].type;
+                if (!schema.options[option].hidden &&
+                    (type == ConfigOptionType::Enum || type == ConfigOptionType::Number || type == ConfigOptionType::Bool)) {
+                    mod_rows.push_back({mod, static_cast<int>(option)});
+                }
+            }
+        }
+    }
+
+    const recomp::config::ConfigOption& mod_option(const ModRow& row) { return mod_schemas[row.mod]->options[row.option]; }
+
+    std::string mod_option_text(const ModRow& row) {
+        const recomp::config::ConfigOption& option = mod_option(row);
+        recomp::config::Config* config = recomp::mods::get_mod_config(mods[row.mod].mod_id);
+        if (config == nullptr) return "";
+        const recomp::config::ConfigValueVariant value = config->get_option_value(option.id);
+        if (const auto* number = std::get_if<uint32_t>(&value)) {
+            const auto& choices = std::get<recomp::config::ConfigOptionEnum>(option.variant);
+            const auto found = choices.find_option_from_value(*number);
+            return found == choices.options.end() ? std::to_string(*number) : found->name;
+        }
+        if (const auto* flag = std::get_if<bool>(&value)) return *flag ? "On" : "Off";
+        if (const auto* real = std::get_if<double>(&value)) {
+            char text[32];
+            std::snprintf(text, sizeof(text), "%.*f", std::get<recomp::config::ConfigOptionNumber>(option.variant).precision, *real);
+            return text;
+        }
+        return "";
+    }
+
+    // Saved by librecomp in mod_config/; the mod reads it through recomp_get_config_*, so most apply at once.
+    void change_mod_option(const ModRow& row, int direction) {
+        const recomp::config::ConfigOption& option = mod_option(row);
+        const std::string& mod_id = mods[row.mod].mod_id;
+        recomp::config::Config* config = recomp::mods::get_mod_config(mod_id);
+        if (config == nullptr) return;
+        const recomp::config::ConfigValueVariant value = config->get_option_value(option.id);
+        if (const auto* number = std::get_if<uint32_t>(&value)) {
+            const auto& choices = std::get<recomp::config::ConfigOptionEnum>(option.variant).options;
+            size_t index = 0;
+            while (index < choices.size() && choices[index].value != *number) index++;
+            const size_t next = (index + choices.size() + direction) % choices.size();
+            recomp::mods::set_mod_config_value(mod_id, option.id, choices[next].value);
+        }
+        else if (const auto* flag = std::get_if<bool>(&value)) {
+            recomp::mods::set_mod_config_value(mod_id, option.id, !*flag);
+        }
+        else if (const auto* real = std::get_if<double>(&value)) {
+            const auto& range = std::get<recomp::config::ConfigOptionNumber>(option.variant);
+            recomp::mods::set_mod_config_value(mod_id, option.id, std::clamp(*real + direction * range.step, range.min, range.max));
         }
     }
 
@@ -122,6 +188,24 @@ namespace {
         save_changes();
     }
 
+    const char* row_section(int row);
+
+    // L/R: first row of the previous or next section (Mods and Cheats are long lists).
+    void jump_section(int direction) {
+        const int count = row_count();
+        int row = selected;
+        if (direction > 0) {
+            while (row < count - 1 && std::strcmp(row_section(row), row_section(selected)) == 0) row++;
+        }
+        else {
+            if (row > 0 && std::strcmp(row_section(row - 1), row_section(row)) != 0) row--;  // already at a start
+            while (row > 0 && std::strcmp(row_section(row - 1), row_section(row)) == 0) row--;
+        }
+        selected = row;
+        quit_armed = false;
+        scroll_to_selection = true;
+    }
+
     void move_selection(int direction) {
         selected = (selected + direction + row_count()) % row_count();
         quit_armed = false;
@@ -146,7 +230,12 @@ namespace {
             return;
         }
         if (is_mod(selected)) {
-            const std::string& id = mods[mod_index(selected)].mod_id;
+            const ModRow& row = mod_rows[mod_index(selected)];
+            if (row.option >= 0) {
+                change_mod_option(row, direction);
+                return;
+            }
+            const std::string& id = mods[row.mod].mod_id;
             if (!recomp::mods::is_mod_auto_enabled(id)) {
                 recomp::mods::enable_mod(id, !recomp::mods::is_mod_enabled(id));
             }
@@ -199,6 +288,8 @@ namespace {
             close_menu();
             return;
         }
+        if (pressed & NX_L) jump_section(-1);
+        if (pressed & NX_R) jump_section(1);
         if (actions & NX_UP) move_selection(-1);
         if (actions & NX_DOWN) move_selection(1);
         if (actions & NX_LEFT) change_selected(-1, false);
@@ -266,7 +357,9 @@ namespace {
             return !nx::cheats::supported(cheat) ? "Unsupported" : nx::cheats::enabled(cheat) ? "On" : "Off";
         }
         if (is_mod(row)) {
-            const std::string& id = mods[mod_index(row)].mod_id;
+            const ModRow& mod_row = mod_rows[mod_index(row)];
+            if (mod_row.option >= 0) return mod_option_text(mod_row);
+            const std::string& id = mods[mod_row.mod].mod_id;
             const bool enabled = recomp::mods::is_mod_enabled(id) || recomp::mods::is_mod_auto_enabled(id);
             std::string text = recomp::mods::is_mod_auto_enabled(id) ? "On (needed)" : enabled ? "On" : "Off";
             if (enabled != mod_enabled_at_start[id]) text += " *";
@@ -286,7 +379,12 @@ namespace {
     const char* row_label(int row) {
         if (is_quit(row)) return "Quit Game";
         if (is_cheat(row)) return nx::cheats::name(cheat_index(row));
-        if (is_mod(row)) return mods[mod_index(row)].display_name.c_str();
+        if (is_mod(row)) {
+            const ModRow& mod_row = mod_rows[mod_index(row)];
+            if (mod_row.option < 0) return mods[mod_row.mod].display_name.c_str();
+            mod_label = "    " + mod_option(mod_row).name;
+            return mod_label.c_str();
+        }
         return nx::info(static_cast<Setting>(row)).label;
     }
 
@@ -306,8 +404,11 @@ namespace {
                 ? "GameShark code from cheats.cht, written into the game's memory every frame while On."
                 : "This code rewrites the game's MIPS instructions, which the recompiled game no longer runs.";
         }
+        if (is_mod(row) && mod_rows[mod_index(row)].option >= 0) {
+            return mod_option(mod_rows[mod_index(row)]).description.c_str();
+        }
         if (is_mod(row)) {
-            const recomp::mods::ModDetails& mod = mods[mod_index(row)];
+            const recomp::mods::ModDetails& mod = mods[mod_rows[mod_index(row)].mod];
             mod_description = mod.short_description.empty() ? mod.description : mod.short_description;
             mod_description += " (version " + mod.version.to_string() + ")";
             return mod_description.c_str();
@@ -330,14 +431,19 @@ namespace {
             draw->AddRectFilled(start, {start.x + width, start.y + height}, ACCENT_FILL, 6.0f);
             draw->AddRectFilled(start, {start.x + 4.0f, start.y + height}, ACCENT, 2.0f);
         }
-        draw->AddText({start.x + 18.0f, start.y + ROW_PADDING}, TEXT, row_label(row));
         std::string value = value_text(row);
         if (is_selected && !is_quit(row)) {
             value = "<  " + value + "  >";
         }
         const float value_width = ImGui::CalcTextSize(value.c_str()).x;
-        draw->AddText({start.x + width - 18.0f - value_width, start.y + ROW_PADDING}, is_selected ? ACCENT : TEXT_DIM,
-                      value.c_str());
+        const float value_x = start.x + width - 18.0f - value_width;
+        // Long labels (cheats) end with an ellipsis before the value instead of running into it.
+        const ImVec2 label_min{start.x + 18.0f, start.y + ROW_PADDING};
+        const ImVec2 label_max{value_x - 16.0f, start.y + height};
+        ImGui::PushStyleColor(ImGuiCol_Text, TEXT);
+        ImGui::RenderTextEllipsis(draw, label_min, label_max, label_max.x, label_max.x, row_label(row), nullptr, nullptr);
+        ImGui::PopStyleColor();
+        draw->AddText({value_x, start.y + ROW_PADDING}, is_selected ? ACCENT : TEXT_DIM, value.c_str());
     }
 
     void draw_menu(float screen_width, float screen_height) {
@@ -376,12 +482,12 @@ namespace {
         ImGui::PushTextWrapPos(0.0f);
         ImGui::TextUnformatted(row_description(selected));
         ImGui::PopTextWrapPos();
-        if (is_mod(selected) || (selected < SETTING_COUNT && nx::info(static_cast<Setting>(selected)).needs_restart)) {
+        if ((is_mod(selected) && mod_rows[mod_index(selected)].option < 0) || (selected < SETTING_COUNT && nx::info(static_cast<Setting>(selected)).needs_restart)) {
             ImGui::PushStyleColor(ImGuiCol_Text, ACCENT);
             ImGui::TextUnformatted("* Applies the next time the game starts.");
             ImGui::PopStyleColor();
         }
-        const char* hint = "Up/Down  Select     Left/Right/A  Change     B  Close";
+        const char* hint = "Up/Down  Select    L/R  Section    Left/Right/A  Change    B  Close";
         ImGui::SetCursorPosY(ImGui::GetWindowHeight() - ImGui::GetStyle().WindowPadding.y - ImGui::GetTextLineHeight());
         ImGui::PushStyleColor(ImGuiCol_Text, TEXT_DIM);
         ImGui::TextUnformatted(hint);
