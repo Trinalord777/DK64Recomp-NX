@@ -9,7 +9,6 @@
 #include <condition_variable>
 #include <cstring>
 #include <mutex>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -229,15 +228,8 @@ void RT64EX_AdjustRectX(f32* xs, u32 count, f32 scale, f32 width) {
 // harness tunes them (gl cutrot <hundredths>, gl cuttrans <units>).
 static f32 cut_rotation = 0.25f;
 static f32 cut_translation = 5000.0f;
-// 60 fps: present both images of a frame as soon as they are rendered (render_gliden64.cpp). Dev harness: gl early.
-static bool present_early = false;
 
 extern "C" int dk64nx_gliden64_set(const char* name, int value) {
-    if (strcmp(name, "early") == 0) {
-        const int previous = present_early ? 1 : 0;
-        present_early = value != 0;
-        return previous;
-    }
     if (strcmp(name, "cutrot") == 0) {
         const int previous = static_cast<int>(cut_rotation * 100.0f);
         cut_rotation = value / 100.0f;
@@ -303,9 +295,6 @@ namespace {
     u32 saved_address = 0;      // color buffer holding the two copies of the last interpolated frame
     FrameBuffer* saved_buffer = nullptr;
     bool in_between_pending = false;
-    // VI origin of each color buffer the VI has shown, by the buffer's start address: early presentation shows a
-    // buffer before the VI does, and only buffers the game displays (never its offscreen ones) are known here.
-    std::unordered_map<u32, u32> vi_origin_of;
 
     struct MatchStats {
         u64 frames = 0;
@@ -518,30 +507,7 @@ extern "C" bool dk64nx_interp_present_in_between(u32 origin) {
     }
     // Until the VI shows that frame's buffer: the swap may land a VI later than the display list.
     if (frameBufferList().findBuffer(origin) != buffer) return false;
-    vi_origin_of[buffer->m_startAddress] = origin;
     in_between_pending = false;
-    buffer->interpCopy(1, false);
-    return true;
-}
-
-extern "C" bool dk64nx_interp_early_enabled() { return present_early; }
-
-// The VI origin that shows the frame just rendered (its in-between's buffer, else the current color buffer), once the
-// VI has shown that buffer before.
-extern "C" bool dk64nx_interp_early_origin(u32* origin) {
-    FrameBuffer* buffer = in_between_pending ? saved_frame() : frameBufferList().getCurrent();
-    if (buffer == nullptr) return false;
-    const auto found = vi_origin_of.find(buffer->m_startAddress);
-    if (found == vi_origin_of.end()) return false;
-    *origin = found->second;
-    return true;
-}
-
-// Puts the pending in-between image in its buffer for the caller to present (then dk64nx_interp_present_done).
-extern "C" bool dk64nx_interp_take_in_between() {
-    FrameBuffer* buffer = in_between_pending ? saved_frame() : nullptr;
-    in_between_pending = false;
-    if (buffer == nullptr) return false;
     buffer->interpCopy(1, false);
     return true;
 }
