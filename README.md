@@ -91,15 +91,20 @@ is open.
 | Camera | Camera type, analog camera sensitivity, invert camera, first person and swimming |
 | Game | Story skip, lightning flashes, cutscene borders, draw distance |
 | Audio | Music and sound effects volume |
-| Display | Show FPS, aspect ratio (16:9 or 4:3), resolution (2x or 3x) |
+| Display | Show FPS, aspect ratio (16:9 or 4:3), resolution (2x or 3x), texture LOD |
 | Performance | Frame rate (30 fps, or 60 fps interpolated, experimental), clock profile |
 | Controls | Face buttons (swap A and B in the game) |
 | Cheats | The GameShark codes of `cheats.cht`, on or off |
-| System | Quit Game, back to the homebrew menu |
+| System | Restart Game (to apply mods and display changes), Quit Game, back to the homebrew menu |
 
 **60 fps (interpolated)** is experimental: the game still runs at its original 30 fps, and an in-between image,
 with every object halfway between two of its frames, is drawn and shown between them, as the PC version does with
-RT64. It adds one frame of latency. Camera cuts are not interpolated.
+RT64. It adds one frame of latency. Camera cuts are not interpolated. Each image waits for the screen's refresh:
+measured in play, 95-100% of the intervals between images fall within 15.5-18 ms (one 60 Hz refresh).
+
+**Texture LOD** is off by default: GLideN64's level of detail emulation tints the Kongs' eye whites pink and blurs
+their pupils, as reported in
+[mupen64plus-libretro-nx#458](https://github.com/libretro/mupen64plus-libretro-nx/issues/458).
 
 **Cheats** come from `sdmc:/switch/dk64recomp/cheats.cht`, in libretro's format: copy
 [Donkey Kong 64 (U).cht](https://github.com/libretro/libretro-database/blob/master/cht/Nintendo%20-%20Nintendo%2064/Donkey%20Kong%2064%20(U).cht)
@@ -112,8 +117,8 @@ them Unsupported. The cheats left on are remembered in `cheats_enabled.txt`.
 applies the docked CPU, GPU and RAM clocks set in [Horizon OC](https://github.com/Horizon-OC/Horizon-OC), if it
 is installed. Both are released when you leave the game.
 
-Changes apply immediately, except the aspect ratio and the resolution, which apply the next time the game
-starts. They are saved to `sdmc:/switch/dk64recomp/nx_options.txt` when the menu closes. By default the game
+Changes apply immediately, except the aspect ratio, the resolution, texture LOD and mods, which apply the next
+time the game starts (System > Restart Game). They are saved to `sdmc:/switch/dk64recomp/nx_options.txt` when the menu closes. By default the game
 runs at its original 30 fps, in 16:9 with the HUD at the screen edges, at 960x720 (3x native), without cutscene
 borders.
 
