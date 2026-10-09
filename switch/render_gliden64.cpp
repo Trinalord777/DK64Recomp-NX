@@ -28,6 +28,10 @@ void dk64nx_remote_time(int kind, uint64_t start_tick);
 #endif
 bool dk64nx_front_buffer_redrawn(uint32_t origin);
 extern "C" void dk64nx_interp_frame_begin();
+extern "C" bool dk64nx_interp_begin_second_pass();
+extern "C" void dk64nx_interp_end_second_pass();
+extern "C" bool dk64nx_interp_present_in_between(uint32_t origin);
+extern "C" void dk64nx_interp_present_done();
 
 namespace {
     // OSTask is copied where the RSP boot code leaves it, at the end of DMEM.
@@ -155,6 +159,12 @@ namespace {
             [[maybe_unused]] const uint64_t start = armGetSystemTick();
             dk64nx_interp_frame_begin();
             ProcessDList();
+            // 60 fps: the same display list again, with matrices halfway from the previous frame (gliden64_rt64ex.cpp).
+            if (nx::interpolated_60() && dk64nx_interp_begin_second_pass()) {
+                sp_status_reg = 0x0203;
+                ProcessDList();
+                dk64nx_interp_end_second_pass();
+            }
             DK64NX_TIME(0, start);
         }
 
@@ -166,6 +176,14 @@ namespace {
             // back-and-forth jitter in motion. Keep the image on screen instead; the VI moves to the
             // other buffer next. Bounded so a single-buffered scene still refreshes.
             const uint32_t origin = ultramodern::renderer::get_vi_regs()->VI_ORIGIN_REG;
+            // 60 fps: a new frame shows its in-between image first; the next VI presents the real one.
+            if (dk64nx_interp_present_in_between(origin)) {
+                UpdateScreen();
+                dk64nx_interp_present_done();
+                held_presents = 0;
+                presented_origin = origin;
+                return;
+            }
             if (origin == presented_origin && held_presents < MAX_HELD_PRESENTS && dk64nx_front_buffer_redrawn(origin)) {
                 held_presents++;
             } else {

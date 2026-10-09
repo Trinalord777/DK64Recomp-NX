@@ -92,14 +92,14 @@ is open.
 | Game | Story skip, lightning flashes, cutscene borders, draw distance |
 | Audio | Music and sound effects volume |
 | Display | Show FPS, aspect ratio (16:9 or 4:3), resolution (2x or 3x) |
-| Performance | Frame rate (30 to 60 fps, experimental above 30), clock profile |
+| Performance | Frame rate (30 fps, or 60 fps interpolated, experimental), clock profile |
 | Controls | Face buttons (swap A and B in the game) |
 | Cheats | The GameShark codes of `cheats.cht`, on or off |
 | System | Quit Game, back to the homebrew menu |
 
-**Frame rate** goes from 30 (the original) to 60 fps in steps of 5. Above 30 it is experimental: the game mixes
-frames of one and two screen refreshes, as it already does in Jetpac (50 fps is four short frames then a long one),
-and stops waiting for the screen between frames. Some timers and mini-games may not keep their original speed.
+**60 fps (interpolated)** is experimental: the game still runs at its original 30 fps, and an in-between image,
+with every object halfway between two of its frames, is drawn and shown between them, as the PC version does with
+RT64. It adds one frame of latency. Camera cuts are not interpolated.
 
 **Cheats** come from `sdmc:/switch/dk64recomp/cheats.cht`, in libretro's format: copy
 [Donkey Kong 64 (U).cht](https://github.com/libretro/libretro-database/blob/master/cht/Nintendo%20-%20Nintendo%2064/Donkey%20Kong%2064%20(U).cht)

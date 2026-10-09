@@ -258,12 +258,12 @@ void dk64nx_remote_on_swap(int width, int height);
 #endif
 
 m64p_error nx_VidExt_GL_SwapBuffers(void) {
-    // Above 30 fps a game frame must fit in one VI, display list included. Two GLideN64 costs did not, on the
-    // graphics thread that also renders the next display list: the swap waiting for vblank, and the copy of each
-    // frame back to RDRAM (double-buffered read-back), which stalled ProcessDList for ~12 ms (20 ms -> 7.3 ms per
-    // frame in game). DK64's pause and transitions look the same without it. At 30 fps both stay as they were.
+    // At 60 fps each display list is processed twice and a frame is presented every VI. Two GLideN64 costs did not
+    // fit, on the graphics thread that also renders the next display list: the swap waiting for vblank, and the copy
+    // of each frame back to RDRAM (double-buffered read-back), which stalled ProcessDList for ~12 ms (20 ms -> 7.3 ms
+    // per pass in game). DK64's pause and transitions look the same without it. At 30 fps both stay as they were.
     static bool fast = false;
-    const bool wants_fast = nx::get(nx::Setting::FrameRate) > 30;
+    const bool wants_fast = nx::interpolated_60();
     if (wants_fast != fast) {
         SDL_GL_SetSwapInterval(wants_fast ? 0 : swap_interval);
         dk64nx_gliden64_set("copy", wants_fast ? 0 : 2);  // 2: GLideN64's default, ctDoubleBuffer

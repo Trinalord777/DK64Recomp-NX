@@ -54,4 +54,5 @@ namespace nx {
 
     inline int resolution_factor() { return at_startup(Setting::Resolution) == 0 ? 2 : 3; }
     inline bool widescreen() { return at_startup(Setting::AspectRatio) == 0; }
+    inline bool interpolated_60() { return get(Setting::FrameRate) == 1; }
 }

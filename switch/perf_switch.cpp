@@ -157,36 +157,13 @@ void dk64nx_perf_stop() {
     apmExit();
 }
 
-// Frame rate of NX Options, read by the patches every frame. Above 30 fps the engine may run frames of a single VI
-// (lag 1), as it already does in Jetpac and the arcade, and scales its physics by each frame's lag.
-namespace {
-    constexpr uint32_t CURRENT_MAP = 0x0076A0A8;  // RDRAM offset of current_map (32-bit)
-
-    // The DK Rap and the intro story are timed to their music frame by frame at 30 fps (see timing_fixes.c): they
-    // keep the original pacing whatever the option says. Map ids from lib/dk64_decomp/include/enums.h.
-    bool music_timed_scene(const uint8_t* rdram) {
-        const int32_t map = *reinterpret_cast<const int32_t*>(rdram + CURRENT_MAP);
-        return map == 76 /* DK Rap */ || map == 152 /* Helm intro */ || map == 153 /* DK Theatre */ ||
-               map == 172 /* Rock intro */;
-    }
-
-    s32 target_fps(const uint8_t* rdram) {
-        return music_timed_scene(rdram) ? 30 : nx::get(nx::Setting::FrameRate);
-    }
-}
-
-// Fewest VIs a game frame may last (getFrameDelta, updateLag): 2 at the original 30 fps, else 1.
+// Game logic pacing, read by the patches every frame (getFrameDelta, updateLag, calculateLagBoost). It stays at the
+// original 30 fps, two VIs per frame: DK64's engine does not scale everything by the frame's lag, and frames of one
+// VI ran the game too fast on the console. 60 fps comes from interpolated frames instead (gliden64_rt64ex.cpp).
 extern "C" void recomp_nx_get_frame_vis(uint8_t* rdram, recomp_context* ctx) {
-    _return(ctx, static_cast<s32>(target_fps(rdram) > 30 ? 1 : 2));
+    _return(ctx, static_cast<s32>(2));
 }
 
-// Called once per game frame (calculateLagBoost): the VIs this frame lasts at least, so that frames of 1 and 2 VIs
-// alternate evenly to the chosen rate, e.g. 50 fps = 1, 1, 1, 1, 2 and 45 fps = 1, 1, 2. Game thread only.
 extern "C" void recomp_nx_next_frame_lag(uint8_t* rdram, recomp_context* ctx) {
-    static s32 credit = 0;  // in 1/fps of a VI
-    const s32 fps = target_fps(rdram);
-    credit += 60;
-    const s32 lag = credit / fps;
-    credit %= fps;
-    _return(ctx, lag);
+    _return(ctx, static_cast<s32>(2));
 }

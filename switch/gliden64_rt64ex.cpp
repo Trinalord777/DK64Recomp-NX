@@ -29,11 +29,14 @@ static u16 g_rt64RectLeftOrigin = 0x800;
 static u16 g_rt64RectRightOrigin = 0x800;
 static u8 g_rt64RectAspect = 0;
 
+static void interp_note_matrix_group(u32 flags);  // frame interpolation, below
+
 namespace {
     constexpr u32 RT64_EXTENDED_OPCODE = 0x64;
     constexpr u32 G_EX_ORIGIN_NONE = 0x800;
     constexpr u32 G_EX_ORIGIN_RIGHT = 0x400;
     constexpr u32 G_EX_ASPECT_STRETCH = 0x1;
+    constexpr u32 G_EX_COMPONENT_SKIP = 0x0;
     constexpr u32 G_EX_ASPECT_ADJUST = 0x2;
 
     enum ExOpcode : u32 {
@@ -143,6 +146,7 @@ namespace {
                 if (_SHIFTR(flags, 1, 1) != 0) {
                     g_rt64ProjStretch = _SHIFTR(flags, 20, 2) == G_EX_ASPECT_STRETCH;
                 }
+                interp_note_matrix_group(flags);
                 break;
             }
             case G_EX_POPSCISSOR_V1: pop_scissor(); break;
@@ -229,9 +233,12 @@ extern "C" int dk64nx_gliden64_set(const char* name, int value) {
     return -1;
 }
 
-// Frame interpolation, step 1: record the matrices of each display list and measure how many match the previous
-// frame's matrix of the same rank (same object, slightly moved), which is what interpolating by load order relies
-// on. Read through the harness ("mtx" command).
+// Frame interpolation (the NX Options frame rate at 60): the game still runs at 30 fps, and each display list is
+// processed twice. The first pass is the real frame and records every matrix gSPMatrix loads. The second pass loads,
+// rank by rank, the average of that matrix and the previous frame's matrix of the same rank, when both are close
+// enough to be the same object (measured on the console: ~97% of them are), and keeps the real one otherwise. Its
+// result is the in-between frame, shown one VI before the real one (render_gliden64.cpp). DK64R's patches mark camera
+// cuts with a projection matrix group whose position does not interpolate: those frames get no in-between image.
 namespace {
     struct LoadedMatrix {
         u32 address;
@@ -241,6 +248,17 @@ namespace {
     std::vector<LoadedMatrix> matrices_current;
     std::vector<LoadedMatrix> matrices_previous;
 
+    constexpr f32 CLOSE_TRANSLATION = 50.0f;  // world units the same object may move in one frame
+    constexpr f32 CLOSE_ROTATION = 0.3f;      // largest change of a rotation/scale element
+    constexpr size_t MATRIX_COUNT_TOLERANCE = 10;  // percent; beyond, the previous frame is another scene
+
+    bool substituting = false;  // second pass: matrices are replaced by rank
+    size_t substitute_rank = 0;
+    bool camera_cut = false;
+    u32 saved_address = 0;      // color buffer holding the two copies of the last interpolated frame
+    FrameBuffer* saved_buffer = nullptr;
+    bool in_between_pending = false;
+
     struct MatchStats {
         u64 frames = 0;
         u64 matrices = 0;
@@ -248,11 +266,20 @@ namespace {
         u64 close = 0;
         u64 far = 0;
         u64 count_changed = 0;
+        u64 interpolated = 0;
     } match_stats;
     std::mutex match_mutex;
 
-    constexpr f32 CLOSE_TRANSLATION = 50.0f;  // world units the same object may move in one frame
-    constexpr f32 CLOSE_ROTATION = 0.3f;      // largest change of a rotation/scale element
+    bool same_object(const LoadedMatrix& a, const LoadedMatrix& b) {
+        if (a.param != b.param) return false;
+        f32 translation = 0.0f;
+        f32 rotation = 0.0f;
+        for (int r = 0; r < 3; r++) {
+            translation = std::max(translation, std::fabs(a.m[3][r] - b.m[3][r]));
+            for (int c = 0; c < 3; c++) rotation = std::max(rotation, std::fabs(a.m[r][c] - b.m[r][c]));
+        }
+        return translation < CLOSE_TRANSLATION && rotation < CLOSE_ROTATION;
+    }
 
     void compare_frames() {
         const size_t count = std::min(matrices_previous.size(), matrices_current.size());
@@ -263,26 +290,43 @@ namespace {
         for (size_t i = 0; i < count; i++) {
             const LoadedMatrix& a = matrices_previous[i];
             const LoadedMatrix& b = matrices_current[i];
-            if (a.param == b.param && memcmp(a.m, b.m, sizeof(a.m)) == 0) {
-                match_stats.equal++;
-                continue;
-            }
-            f32 translation = 0.0f;
-            f32 rotation = 0.0f;
-            for (int r = 0; r < 3; r++) {
-                translation = std::max(translation, std::fabs(a.m[3][r] - b.m[3][r]));
-                for (int c = 0; c < 3; c++) rotation = std::max(rotation, std::fabs(a.m[r][c] - b.m[r][c]));
-            }
-            const bool close = a.param == b.param && translation < CLOSE_TRANSLATION && rotation < CLOSE_ROTATION;
-            (close ? match_stats.close : match_stats.far)++;
+            if (a.param == b.param && memcmp(a.m, b.m, sizeof(a.m)) == 0) match_stats.equal++;
+            else if (same_object(a, b)) match_stats.close++;
+            else match_stats.far++;
         }
+    }
+
+    bool counts_similar(size_t a, size_t b) {
+        return a * 100 <= b * (100 + MATRIX_COUNT_TOLERANCE) && b * 100 <= a * (100 + MATRIX_COUNT_TOLERANCE);
+    }
+
+    FrameBuffer* saved_frame() {
+        FrameBuffer* buffer = frameBufferList().findBuffer(saved_address);
+        return buffer == saved_buffer ? buffer : nullptr;
     }
 }
 
-void RT64EX_OnMatrix(u32 address, u8 param, const f32 mtx[4][4]) {
-    LoadedMatrix loaded{address, param, {}};
-    memcpy(loaded.m, mtx, sizeof(loaded.m));
-    matrices_current.push_back(loaded);
+void RT64EX_OnMatrix(u32 address, u8 param, f32 mtx[4][4]) {
+    if (!substituting) {
+        LoadedMatrix loaded{address, param, {}};
+        memcpy(loaded.m, mtx, sizeof(loaded.m));
+        matrices_current.push_back(loaded);
+        return;
+    }
+    const size_t rank = substitute_rank++;
+    if (rank >= matrices_previous.size() || rank >= matrices_current.size()) return;
+    const LoadedMatrix& before = matrices_previous[rank];
+    const LoadedMatrix& now = matrices_current[rank];
+    if (!same_object(before, now)) return;
+    for (int r = 0; r < 4; r++) {
+        for (int c = 0; c < 4; c++) mtx[r][c] = 0.5f * (before.m[r][c] + now.m[r][c]);
+    }
+}
+
+// The projection matrix group of DK64R's camera (handle_interpolation in patches_interpolation.c).
+static void interp_note_matrix_group(u32 flags) {
+    const bool projection = _SHIFTR(flags, 1, 1) != 0;
+    if (projection && _SHIFTR(flags, 3, 2) == G_EX_COMPONENT_SKIP) camera_cut = true;
 }
 
 // Graphics thread, before each display list.
@@ -292,6 +336,53 @@ extern "C" void dk64nx_interp_frame_begin() {
         std::swap(matrices_previous, matrices_current);
     }
     matrices_current.clear();
+    camera_cut = false;
+}
+
+// After the first pass. False when this frame gets no in-between image.
+extern "C" bool dk64nx_interp_begin_second_pass() {
+    FrameBuffer* buffer = frameBufferList().getCurrent();
+    if (camera_cut || matrices_previous.empty() || buffer == nullptr || config.video.multisampling != 0 ||
+        !counts_similar(matrices_previous.size(), matrices_current.size())) {
+        return false;
+    }
+    buffer->interpCopy(0, true);
+    saved_buffer = buffer;
+    saved_address = buffer->m_startAddress;
+    substituting = true;
+    substitute_rank = 0;
+    return true;
+}
+
+extern "C" void dk64nx_interp_end_second_pass() {
+    substituting = false;
+    if (FrameBuffer* buffer = saved_frame()) {
+        buffer->interpCopy(1, true);   // the in-between frame
+        buffer->interpCopy(0, false);  // the real one back
+        in_between_pending = true;
+        std::lock_guard lock{match_mutex};
+        match_stats.interpolated++;
+    }
+}
+
+// VI: when the frame about to be shown has an in-between image, put it in the color buffer and return true; the
+// caller presents it, then calls dk64nx_interp_present_done to put the real frame back for the next VI.
+extern "C" bool dk64nx_interp_present_in_between(u32 origin) {
+    if (!in_between_pending) return false;
+    FrameBuffer* buffer = saved_frame();
+    if (buffer == nullptr) {
+        in_between_pending = false;
+        return false;
+    }
+    // Until the VI shows that frame's buffer: the swap may land a VI later than the display list.
+    if (frameBufferList().findBuffer(origin) != buffer) return false;
+    in_between_pending = false;
+    buffer->interpCopy(1, false);
+    return true;
+}
+
+extern "C" void dk64nx_interp_present_done() {
+    if (FrameBuffer* buffer = saved_frame()) buffer->interpCopy(0, false);
 }
 
 extern "C" int dk64nx_interp_stats(char* out, int size) {
@@ -299,8 +390,9 @@ extern "C" int dk64nx_interp_stats(char* out, int size) {
     const MatchStats s = match_stats;
     match_stats = {};
     const double pairs = static_cast<double>(s.equal + s.close + s.far);
-    return snprintf(out, size, "frames=%llu matrices/frame=%.0f equal=%.1f%% close=%.1f%% far=%.1f%% count_changed=%llu",
-                    (unsigned long long)s.frames, s.frames ? double(s.matrices) / s.frames : 0.0,
+    return snprintf(out, size, "frames=%llu interpolated=%llu matrices/frame=%.0f equal=%.1f%% close=%.1f%% far=%.1f%% count_changed=%llu",
+                    (unsigned long long)s.frames, (unsigned long long)s.interpolated,
+                    s.frames ? double(s.matrices) / s.frames : 0.0,
                     pairs ? 100.0 * s.equal / pairs : 0.0, pairs ? 100.0 * s.close / pairs : 0.0,
                     pairs ? 100.0 * s.far / pairs : 0.0, (unsigned long long)s.count_changed);
 }

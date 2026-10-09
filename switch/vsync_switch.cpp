@@ -1,6 +1,6 @@
-// VI pacing from the display. Above 30 fps a VI follows the vblank of the TV (or of the console's screen) instead of
-// ultramodern's 60 Hz timer, which drifts against it: frames then reach the screen once per refresh, without the
-// occasional doubled or skipped one. At 30 fps the timer keeps the pacing the port shipped with.
+// VI pacing from the display. At 60 fps (interpolated) a VI follows the vblank of the TV (or of the console's screen)
+// instead of ultramodern's 60 Hz timer, which drifts against it: frames then reach the screen once per refresh,
+// without the occasional doubled or skipped one. At 30 fps the timer keeps the pacing the port shipped with.
 #include <cstdio>
 
 #include <switch.h>
@@ -18,7 +18,7 @@ namespace {
 
 // VI thread. False when the timer should pace this VI: 30 fps, or no vsync event from the display.
 extern "C" bool dk64nx_wait_vsync() {
-    if (nx::get(nx::Setting::FrameRate) <= 30) return false;
+    if (!nx::interpolated_60()) return false;
     if (state == State::NotOpened) {
         const bool open = R_SUCCEEDED(viOpenDefaultDisplay(&display)) && R_SUCCEEDED(viGetDisplayVsyncEvent(&display, &vsync));
         state = open ? State::Open : State::Unavailable;

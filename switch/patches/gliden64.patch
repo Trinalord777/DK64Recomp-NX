@@ -1,3 +1,72 @@
+diff --git a/src/FrameBuffer.cpp b/src/FrameBuffer.cpp
+index 9d6ba51..1cf19b3 100644
+--- a/src/FrameBuffer.cpp
++++ b/src/FrameBuffer.cpp
+@@ -52,6 +52,11 @@ FrameBuffer::~FrameBuffer()
+ 	gfxContext.deleteFramebuffer(m_SubFBO);
+ 	if (m_copyFBO != ObjectHandle::defaultFramebuffer)
+ 		gfxContext.deleteFramebuffer(m_copyFBO);
++	for (u32 i = 0; i < 2; ++i) {
++		if (m_interpFBO[i] != ObjectHandle::defaultFramebuffer)
++			gfxContext.deleteFramebuffer(m_interpFBO[i]);
++		textureCache().removeFrameBufferTexture(m_pInterpTexture[i]);
++	}
+ 
+ 	textureCache().removeFrameBufferTexture(m_pTexture);
+ 	textureCache().removeFrameBufferTexture(m_pDepthTexture);
+@@ -436,6 +441,35 @@ void FrameBuffer::_initCopyTexture()
+ 		m_pFrameBufferCopyTexture->frameBufferTexture = CachedTexture::fbMultiSample;
+ }
+ 
++void FrameBuffer::interpCopy(u32 _slot, bool _save)
++{
++	if (m_pInterpTexture[_slot] == nullptr) {
++		m_interpFBO[_slot] = gfxContext.createFramebuffer();
++		m_pInterpTexture[_slot] = textureCache().addFrameBufferTexture(textureTarget::TEXTURE_2D);
++		_initTexture(static_cast<u16>(m_width), VI_GetMaxBufferHeight(static_cast<u16>(m_width)),
++					 m_pTexture->format, m_pTexture->size, m_pInterpTexture[_slot]);
++		_setAndAttachTexture(m_interpFBO[_slot], m_pInterpTexture[_slot], 0, false);
++	}
++
++	Context::BlitFramebuffersParams blitParams;
++	blitParams.readBuffer = _save ? m_FBO : m_interpFBO[_slot];
++	blitParams.drawBuffer = _save ? m_interpFBO[_slot] : m_FBO;
++	blitParams.srcX0 = 0;
++	blitParams.srcY0 = 0;
++	blitParams.srcX1 = m_pTexture->width;
++	blitParams.srcY1 = m_pTexture->height;
++	blitParams.dstX0 = 0;
++	blitParams.dstY0 = 0;
++	blitParams.dstX1 = m_pTexture->width;
++	blitParams.dstY1 = m_pTexture->height;
++	blitParams.mask = blitMask::COLOR_BUFFER;
++	blitParams.filter = textureParameters::FILTER_NEAREST;
++	gfxContext.blitFramebuffers(blitParams);
++
++	gfxContext.bindFramebuffer(bufferTarget::READ_FRAMEBUFFER, ObjectHandle::defaultFramebuffer);
++	frameBufferList().setCurrentDrawBuffer();
++}
++
+ CachedTexture * FrameBuffer::_copyFrameBufferTexture()
+ {
+ 	if (m_copied)
+diff --git a/src/FrameBuffer.h b/src/FrameBuffer.h
+index 6e06dae..d5b3a39 100644
+--- a/src/FrameBuffer.h
++++ b/src/FrameBuffer.h
+@@ -90,6 +90,12 @@ struct FrameBuffer
+ 	graphics::ObjectHandle m_copyFBO;
+ 	CachedTexture * m_pFrameBufferCopyTexture = nullptr;
+ 
++	// Frame interpolation (switch/gliden64_rt64ex.cpp): copies the color buffer to (_save) or from one of two
++	// saved slots, the real frame and the in-between one.
++	void interpCopy(u32 _slot, bool _save);
++	graphics::ObjectHandle m_interpFBO[2];
++	CachedTexture * m_pInterpTexture[2] = {nullptr, nullptr};
++
+ 	std::vector<u8> m_RdramCopy;
+ 
+ private:
 diff --git a/src/GBI.cpp b/src/GBI.cpp
 index 0423612..cdf0dbb 100644
 --- a/src/GBI.cpp
@@ -120,7 +189,7 @@ index 9f7796f..552aa08 100644
  
  	m_rect[0].bc0 = 0.0f;
 diff --git a/src/RSP.h b/src/RSP.h
-index bf3ba27..f991c2b 100644
+index bf3ba27..7077350 100644
 --- a/src/RSP.h
 +++ b/src/RSP.h
 @@ -22,7 +22,21 @@ extern RSPInfo RSP;
@@ -142,7 +211,7 @@ index bf3ba27..f991c2b 100644
 +bool RT64EX_ShouldAdjustRect(bool narrow);
 +void RT64EX_AdjustRectX(f32* xs, u32 count, f32 scale, f32 width);
 +// Every matrix gSPMatrix loads, for frame interpolation (switch/gliden64_rt64ex.cpp).
-+void RT64EX_OnMatrix(u32 address, u8 param, const f32 mtx[4][4]);
++void RT64EX_OnMatrix(u32 address, u8 param, f32 mtx[4][4]);
  
  void RSP_Init();
  void RSP_ProcessDList();
