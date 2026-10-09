@@ -3,6 +3,7 @@
 // captures the presented frame, reads RDRAM and per-thread CPU load, and returns the startup experiments.
 // There is no authentication, so it must never be part of a release build. Client: switch/dk64nx_remote.py
 #include <arpa/inet.h>
+#include <poll.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -10,6 +11,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <sstream>
@@ -252,10 +254,25 @@ namespace {
         return "ERR commands: press stick rstick shot peek setbits status cpu timing gl exp\n";
     }
 
+    // The process exit stops the server (stop_server): libnx tears the sockets down afterwards, and a thread still
+    // blocked in accept() then crashed every Quit/Restart Game. So the server only blocks POLL_MS at a time.
+    constexpr int POLL_MS = 200;
+    std::atomic<bool> stopping{false};
+    std::thread server_thread;
+
+    // Waits until fd is readable; false when the server is stopping.
+    bool wait_readable(int fd) {
+        while (!stopping) {
+            pollfd entry{fd, POLLIN, 0};
+            if (poll(&entry, 1, POLL_MS) > 0) return true;
+        }
+        return false;
+    }
+
     void serve_client(int fd) {
         std::string pending;
         char buffer[512];
-        while (true) {
+        while (wait_readable(fd)) {
             const ssize_t got = recv(fd, buffer, sizeof(buffer), 0);
             if (got <= 0) return;
             pending.append(buffer, static_cast<size_t>(got));
@@ -282,19 +299,26 @@ namespace {
             return;
         }
         std::printf("[DK64NX] remote: listening on port %d\n", PORT);
-        while (true) {
+        while (wait_readable(listener)) {
             const int client = accept(listener, nullptr, nullptr);
             if (client < 0) continue;
             serve_client(client);
             close(client);
         }
+        close(listener);
+    }
+
+    void stop_server() {
+        stopping = true;
+        if (server_thread.joinable()) server_thread.join();
     }
 }
 
 void dk64nx_remote_start() {
     experiments = dk64nx_run_experiments();
     std::fputs(experiments.c_str(), stdout);
-    std::thread(server_loop).detach();
+    server_thread = std::thread(server_loop);
+    std::atexit(stop_server);
 }
 
 void dk64nx_remote_time(int kind, uint64_t start_tick) {
