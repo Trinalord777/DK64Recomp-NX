@@ -74,6 +74,19 @@ def main() -> int:
     args = parser.parse_args()
 
     with socket.create_connection((args.host, PORT), timeout=10) as sock:
+        if args.command[0] == "ishot":
+            # Real and in-between copies of one interpolated frame: <prefix>_real.png, <prefix>_between.png.
+            prefix = args.command[1] if len(args.command) > 1 else "ishot"
+            sock.sendall(b"ishot\n")
+            header = read_line(sock)
+            if not header.startswith("OK"):
+                print(header, file=sys.stderr)
+                return 1
+            _, width, height, size = header.split()
+            for name in ("real", "between"):
+                write_png(Path(f"{prefix}_{name}.png"), int(width), int(height), read_exact(sock, int(size)))
+            print(f"saved {prefix}_real.png and {prefix}_between.png ({width}x{height})")
+            return 0
         if args.command[0] == "shot":
             out = Path(args.command[1] if len(args.command) > 1 else "shot.png")
             sock.sendall(b"shot\n")

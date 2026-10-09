@@ -4,13 +4,18 @@
 // is implemented; interpolation and widescreen hints are skipped.
 // Encodings: lib/rt64/include/rt64_extended_gbi.h. Semantics: lib/rt64/src/gbi/rt64_gbi_extended.cpp.
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstring>
 #include <mutex>
 #include <utility>
 #include <vector>
 
 #include "Config.h"
+#include "Graphics/Context.h"
+#include "Graphics/OpenGLContext/GLFunctions.h"
+#include "Graphics/Parameters.h"
 #include "FrameBuffer.h"
 #include "GBI.h"
 #include "N64.h"
@@ -393,10 +398,53 @@ extern "C" bool dk64nx_interp_begin_second_pass() {
     return true;
 }
 
+// Developer harness ("ishot"): both copies of the next interpolated frame, real then in-between, bottom-up RGBA.
+namespace {
+    std::mutex capture_mutex;
+    std::condition_variable capture_cv;
+    bool capture_wanted = false;
+    bool capture_ready = false;
+    std::vector<u8> capture_pixels[2];
+    u32 capture_width = 0;
+    u32 capture_height = 0;
+
+    void capture_copies(FrameBuffer* buffer) {
+        std::lock_guard lock{capture_mutex};
+        if (!capture_wanted) return;
+        capture_width = buffer->m_pTexture->width;
+        capture_height = buffer->m_pTexture->height;
+        for (u32 slot = 0; slot < 2; slot++) {
+            capture_pixels[slot].resize(size_t(capture_width) * capture_height * 4);
+            gfxContext.bindFramebuffer(graphics::bufferTarget::READ_FRAMEBUFFER, buffer->m_interpFBO[slot]);
+            glReadPixels(0, 0, capture_width, capture_height, GL_RGBA, GL_UNSIGNED_BYTE, capture_pixels[slot].data());
+        }
+        gfxContext.bindFramebuffer(graphics::bufferTarget::READ_FRAMEBUFFER, graphics::ObjectHandle::defaultFramebuffer);
+        capture_wanted = false;
+        capture_ready = true;
+        capture_cv.notify_all();
+    }
+}
+
+extern "C" bool dk64nx_interp_capture(u32* width, u32* height, const u8** real, const u8** in_between) {
+    std::unique_lock lock{capture_mutex};
+    capture_ready = false;
+    capture_wanted = true;
+    if (!capture_cv.wait_for(lock, std::chrono::seconds(2), [] { return capture_ready; })) {
+        capture_wanted = false;
+        return false;
+    }
+    *width = capture_width;
+    *height = capture_height;
+    *real = capture_pixels[0].data();
+    *in_between = capture_pixels[1].data();
+    return true;
+}
+
 extern "C" void dk64nx_interp_end_second_pass() {
     substituting = false;
     if (FrameBuffer* buffer = saved_frame()) {
         buffer->interpCopy(1, true);   // the in-between frame
+        capture_copies(buffer);
         buffer->interpCopy(0, false);  // the real one back
         in_between_pending = true;
         std::lock_guard lock{match_mutex};

@@ -20,9 +20,11 @@ namespace {
 extern "C" bool dk64nx_wait_vsync() {
     if (!nx::interpolated_60()) return false;
     if (state == State::NotOpened) {
-        const bool open = R_SUCCEEDED(viOpenDefaultDisplay(&display)) && R_SUCCEEDED(viGetDisplayVsyncEvent(&display, &vsync));
-        state = open ? State::Open : State::Unavailable;
-        std::printf("[DK64NX] VI pacing above 30 fps: %s\n", open ? "display vsync" : "timer (no vsync event)");
+        const Result display_rc = viOpenDefaultDisplay(&display);
+        const Result event_rc = R_SUCCEEDED(display_rc) ? viGetDisplayVsyncEvent(&display, &vsync) : display_rc;
+        state = R_SUCCEEDED(event_rc) ? State::Open : State::Unavailable;
+        std::printf("[DK64NX] VI pacing at 60 fps: %s (display 0x%x, vsync event 0x%x)\n",
+                    state == State::Open ? "display vsync" : "timer", display_rc, event_rc);
     }
     return state == State::Open && R_SUCCEEDED(eventWait(&vsync, VSYNC_TIMEOUT_NS));
 }

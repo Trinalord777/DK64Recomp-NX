@@ -25,6 +25,7 @@
 std::string dk64nx_run_experiments();
 extern "C" int dk64nx_gliden64_set(const char* name, int value);
 extern "C" int dk64nx_interp_stats(char* out, int size);
+extern "C" bool dk64nx_interp_capture(uint32_t* width, uint32_t* height, const uint8_t** real, const uint8_t** in_between);
 
 namespace {
     constexpr int PORT = 28280;
@@ -186,6 +187,22 @@ namespace {
             stick.x = x; stick.y = y;
             stick.until = now_ms() + ms;
             return "OK\n";
+        }
+        if (command == "ishot") {
+            // Real and in-between copies of the next interpolated frame (60 fps mode), back to back.
+            *binary_sent = true;
+            uint32_t width = 0, height = 0;
+            const uint8_t* real = nullptr;
+            const uint8_t* in_between = nullptr;
+            if (!dk64nx_interp_capture(&width, &height, &real, &in_between)) {
+                send_all(fd, "ERR no interpolated frame within 2 s\n", 37);
+                return "";
+            }
+            const size_t size = size_t(width) * height * 4;
+            char header[64];
+            const int length = std::snprintf(header, sizeof(header), "OK %u %u %zu\n", width, height, size);
+            send_all(fd, header, length) && send_all(fd, real, size) && send_all(fd, in_between, size);
+            return "";
         }
         if (command == "shot") {
             *binary_sent = true;
