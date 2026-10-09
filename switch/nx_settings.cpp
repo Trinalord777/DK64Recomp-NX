@@ -60,9 +60,10 @@ namespace {
          "two of its frames, as on PC. Costs one frame of latency.",
          0, {"30 fps", "60 fps (interpolated)"}},
         {"Performance", "clock_profile", "Clock Profile",
-         "Handheld only, while in the game. Docked GPU: the official docked GPU profile (768 MHz). Horizon OC: "
-         "the docked CPU, GPU and RAM clocks set in Horizon OC.",
-         0, {"Console Default", "Docked GPU in Handheld", "Horizon OC Docked Clocks"}},
+         "While in the game. Docked GPU (handheld only): the official docked GPU profile (768 MHz). Horizon OC "
+         "(handheld only): the docked CPU, GPU and RAM clocks set in Horizon OC. CPU Boost (needs Horizon OC): the "
+         "CPU at 1785 MHz, the official boost clock, docked and handheld; it keeps 60 fps steady.",
+         0, {"Console Default", "Docked GPU in Handheld", "Horizon OC Docked Clocks", "CPU Boost (Horizon OC)"}},
         {"Controls", "face_buttons", "Face Buttons",
          "Flipped swaps the A and B buttons in the game (not in this menu).",
          0, {"Normal", "Flipped"}},

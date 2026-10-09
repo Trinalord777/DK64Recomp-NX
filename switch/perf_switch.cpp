@@ -1,7 +1,7 @@
 // Clock profiles of NX Options > Performance, applied on the main thread (dk64nx_perf_update, called by the SDL
 // event pump): only while the game has focus, re-evaluated when the console is docked or undocked, released when
-// the game loses focus or exits. Both profiles raise the clocks in handheld only; docked already runs at the
-// docked clocks. Two sources, as in mpo_nx and sa2-nx:
+// the game loses focus or exits. The GPU profiles raise the clocks in handheld only; docked already runs at the
+// docked clocks. CPU Boost raises the CPU in both, for 60 fps. Two sources, as in mpo_nx and sa2-nx:
 //  - the official apm configuration "docked GPU in handheld" (GPU 768 MHz), with mpo_nx's fallback;
 //  - Horizon OC (hoc:clk): the clocks configured in its docked column (this program's profile, else the global
 //    one), forced with its override command. No frequency is invented: a module with no docked value is left
@@ -16,7 +16,7 @@
 #include "nx_settings.h"
 
 namespace {
-    enum class Profile { ConsoleDefault, DockedGpu, HorizonOcDocked };
+    enum class Profile { ConsoleDefault, DockedGpu, HorizonOcDocked, CpuBoost };
 
     constexpr u32 APM_DOCKED_GPU = 0x00010001;           // GPU 768 MHz
     constexpr u32 APM_DOCKED_GPU_FALLBACK = 0x92220007;  // GPU 460.8 MHz, RAM 1600 MHz
@@ -31,6 +31,10 @@ namespace {
     constexpr int HOC_DOCKED = 4;
     constexpr u32 HOC_CLOCK_MODULES = 3;     // only CPU, GPU and MEM are touched
     constexpr const char* HOC_MARKER = "sdmc:/switch/dk64recomp/.hoc_override";
+    // The CPU clock of the console's official boost mode (loading screens), on every model. At the stock docked
+    // 1020 MHz the two passes of a 60 fps frame took 17-19 ms in DK Isles, over the 16.7 ms budget.
+    constexpr u32 HOC_CPU_MODULE = 0;
+    constexpr u32 CPU_BOOST_MHZ = 1785;
 
     struct HocProfiles { u32 mhz[HOC_PROFILE_COUNT][HOC_MODULE_COUNT]; };
     struct HocOverride { u32 module; u32 hz; };
@@ -99,6 +103,18 @@ namespace {
         serviceClose(&service);
     }
 
+    void apply_hoc_cpu_boost() {
+        Service service;
+        if (!open_hoc(&service)) {
+            std::printf("[DK64NX] perf: Horizon OC not running\n");
+            return;
+        }
+        if (FILE* marker = std::fopen(HOC_MARKER, "w")) std::fclose(marker);
+        const Result rc = hoc_override(&service, HOC_CPU_MODULE, CPU_BOOST_MHZ * 1000000u);
+        std::printf("[DK64NX] perf: Horizon OC CPU -> %u MHz (0x%x)\n", CPU_BOOST_MHZ, rc);
+        serviceClose(&service);
+    }
+
     void apply_apm_docked_gpu() {
         if (R_FAILED(apmGetPerformanceConfiguration(ApmPerformanceMode_Normal, &apm_original))) return;
         Result rc = apmSetPerformanceConfiguration(ApmPerformanceMode_Normal, APM_DOCKED_GPU);
@@ -112,7 +128,7 @@ namespace {
             apmSetPerformanceConfiguration(ApmPerformanceMode_Normal, apm_original);
             apm_changed = false;
         }
-        if (applied == Profile::HorizonOcDocked && applied_in_handheld) {
+        if ((applied == Profile::HorizonOcDocked && applied_in_handheld) || applied == Profile::CpuBoost) {
             release_hoc();
         }
         applied = Profile::ConsoleDefault;
@@ -121,6 +137,7 @@ namespace {
     void apply(Profile profile, bool handheld) {
         if (handheld && profile == Profile::DockedGpu) apply_apm_docked_gpu();
         if (handheld && profile == Profile::HorizonOcDocked) apply_hoc_docked();
+        if (profile == Profile::CpuBoost) apply_hoc_cpu_boost();
         applied = profile;
         applied_in_handheld = handheld;
     }

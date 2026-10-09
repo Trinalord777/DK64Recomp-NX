@@ -344,6 +344,8 @@ void dk64nx_seed_gliden64_config() {
     // 3 = adjust: 3D widened to 16:9, 2D kept at its aspect and placed by DK64R's RT64 alignment
     // commands (gliden64_rt64ex.cpp), i.e. the PC port's "Expand" with HUD at the screen edges. 1 = 4:3.
     set_param(gliden, "AspectRatio", int_param(nx::widescreen() ? 3 : 1), false);
+    // Threaded video (GL calls on their own thread) measured worse at the stock 1020 MHz CPU: in DK Isles' water,
+    // 16 present intervals of 25-31 ms in 4 s, against none without it.
     set_param(gliden, "ThreadedVideo", bool_param(false), false);
     set_param(gliden, "EnableLOD", bool_param(nx::at_startup(nx::Setting::TextureLod) == 1), false);
     set_param(gliden, "txHiresEnable", bool_param(false), false);
