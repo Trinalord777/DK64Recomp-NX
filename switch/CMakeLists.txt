@@ -127,6 +127,7 @@ add_executable(dk64recomp
     nx_cheats.cpp
     nx_menu.cpp
     jit_switch.c
+    vsync_switch.cpp
     perf_switch.cpp
 )
 if(DK64NX_REMOTE)
