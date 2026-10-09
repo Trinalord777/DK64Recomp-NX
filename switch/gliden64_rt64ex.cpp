@@ -205,8 +205,9 @@ void RT64EX_AdjustRectX(f32* xs, u32 count, f32 scale, f32 width) {
     }
 }
 
-// Developer harness (remote_switch.cpp, "gl" command): change a GLideN64 setting while the game runs, to measure
-// what it costs. Returns the previous value, or -1 for an unknown name.
+// Changes a GLideN64 setting while the game runs: the frame rate option (core_switch.cpp) and the developer
+// harness ("gl" command, to measure what a setting costs). Graphics thread for the former. Returns the previous
+// value, or -1 for an unknown name.
 extern "C" int dk64nx_gliden64_set(const char* name, int value) {
     struct Field { const char* name; u32* value; };
     const Field fields[] = {

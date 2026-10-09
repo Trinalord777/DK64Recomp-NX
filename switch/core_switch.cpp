@@ -252,18 +252,22 @@ m64p_error nx_VidExt_GL_GetAttribute(m64p_GLattr attr, int* value) {
 }
 
 void dk64nx_menu_on_swap(int width, int height);
+int dk64nx_gliden64_set(const char* name, int value);
 #ifdef DK64NX_REMOTE
 void dk64nx_remote_on_swap(int width, int height);
 #endif
 
 m64p_error nx_VidExt_GL_SwapBuffers(void) {
-    // Above 30 fps a swap does not wait for vblank: ultramodern's graphics thread renders the next display list
-    // only after the present returns, so a blocking swap made every game frame last two VIs.
-    static int applied_interval = -1;
-    const int interval = nx::get(nx::Setting::FrameRate) > 30 ? 0 : swap_interval;
-    if (interval != applied_interval) {
-        SDL_GL_SetSwapInterval(interval);
-        applied_interval = interval;
+    // Above 30 fps a game frame must fit in one VI, display list included. Two GLideN64 costs did not, on the
+    // graphics thread that also renders the next display list: the swap waiting for vblank, and the copy of each
+    // frame back to RDRAM (double-buffered read-back), which stalled ProcessDList for ~12 ms (20 ms -> 7.3 ms per
+    // frame in game). DK64's pause and transitions look the same without it. At 30 fps both stay as they were.
+    static bool fast = false;
+    const bool wants_fast = nx::get(nx::Setting::FrameRate) > 30;
+    if (wants_fast != fast) {
+        SDL_GL_SetSwapInterval(wants_fast ? 0 : swap_interval);
+        dk64nx_gliden64_set("copy", wants_fast ? 0 : 2);  // 2: GLideN64's default, ctDoubleBuffer
+        fast = wants_fast;
     }
     dk64nx_menu_on_swap(SCREEN_WIDTH, SCREEN_HEIGHT);
 #ifdef DK64NX_REMOTE
