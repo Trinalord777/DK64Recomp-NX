@@ -7,13 +7,16 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <string>
+#include <vector>
 
 #include <glad/glad.h>
 #include <SDL.h>
 #include <switch.h>
 
 #include "imgui.h"
+#include "librecomp/mods.hpp"
 #include "imgui_impl_opengl3.h"
 #include "nx_cheats.h"
 #include "nx_pad.h"
@@ -22,8 +25,14 @@
 namespace {
     using nx::Setting;
 
-    // Rows: the settings, then the cheats of cheats.cht, then Quit Game.
+    // Rows: the settings, the mods, the cheats of cheats.cht, then Quit Game.
     constexpr int SETTING_COUNT = static_cast<int>(Setting::Count);
+    constexpr const char* MOD_GAME_ID = "dk64";
+
+    // Read when the menu opens; mods load when the game starts, so a change needs a restart.
+    std::vector<recomp::mods::ModDetails> mods;
+    std::map<std::string, bool> mod_enabled_at_start;
+    std::string mod_description;
     constexpr uint32_t TOGGLE = NX_MINUS | NX_PLUS;
     constexpr uint32_t DIRECTIONS = NX_UP | NX_DOWN | NX_LEFT | NX_RIGHT;
     constexpr uint64_t REPEAT_DELAY_MS = 400;
@@ -60,10 +69,20 @@ namespace {
 
     // The left stick acts as the D-pad along its dominant axis only (a diagonal would move and change a value at
     // once), pressed past STICK_PRESS and released below STICK_RELEASE.
-    int row_count() { return SETTING_COUNT + nx::cheats::count() + 1; }
+    int mod_count() { return static_cast<int>(mods.size()); }
+    int row_count() { return SETTING_COUNT + mod_count() + nx::cheats::count() + 1; }
     bool is_quit(int row) { return row == row_count() - 1; }
-    bool is_cheat(int row) { return row >= SETTING_COUNT && !is_quit(row); }
-    int cheat_index(int row) { return row - SETTING_COUNT; }
+    bool is_mod(int row) { return row >= SETTING_COUNT && row < SETTING_COUNT + mod_count(); }
+    bool is_cheat(int row) { return row >= SETTING_COUNT + mod_count() && !is_quit(row); }
+    int mod_index(int row) { return row - SETTING_COUNT; }
+    int cheat_index(int row) { return row - SETTING_COUNT - mod_count(); }
+
+    void refresh_mods() {
+        mods = recomp::mods::get_all_mod_details(MOD_GAME_ID);
+        for (const recomp::mods::ModDetails& mod : mods) {
+            mod_enabled_at_start.try_emplace(mod.mod_id, recomp::mods::is_mod_enabled(mod.mod_id));
+        }
+    }
 
     void save_changes() {
         if (changed) {
@@ -87,6 +106,7 @@ namespace {
     }
 
     void open_menu() {
+        refresh_mods();
         is_open = true;
         owns_pad = true;
         release_pending = false;
@@ -123,6 +143,13 @@ namespace {
         }
         if (is_cheat(selected)) {
             nx::cheats::toggle(cheat_index(selected));
+            return;
+        }
+        if (is_mod(selected)) {
+            const std::string& id = mods[mod_index(selected)].mod_id;
+            if (!recomp::mods::is_mod_auto_enabled(id)) {
+                recomp::mods::enable_mod(id, !recomp::mods::is_mod_enabled(id));
+            }
             return;
         }
         const Setting setting = static_cast<Setting>(selected);
@@ -238,6 +265,13 @@ namespace {
             const int cheat = cheat_index(row);
             return !nx::cheats::supported(cheat) ? "Unsupported" : nx::cheats::enabled(cheat) ? "On" : "Off";
         }
+        if (is_mod(row)) {
+            const std::string& id = mods[mod_index(row)].mod_id;
+            const bool enabled = recomp::mods::is_mod_enabled(id) || recomp::mods::is_mod_auto_enabled(id);
+            std::string text = recomp::mods::is_mod_auto_enabled(id) ? "On (needed)" : enabled ? "On" : "Off";
+            if (enabled != mod_enabled_at_start[id]) text += " *";
+            return text;
+        }
         const Setting setting = static_cast<Setting>(row);
         const nx::SettingInfo& info = nx::info(setting);
         const int value = nx::get(setting);
@@ -252,12 +286,14 @@ namespace {
     const char* row_label(int row) {
         if (is_quit(row)) return "Quit Game";
         if (is_cheat(row)) return nx::cheats::name(cheat_index(row));
+        if (is_mod(row)) return mods[mod_index(row)].display_name.c_str();
         return nx::info(static_cast<Setting>(row)).label;
     }
 
     const char* row_section(int row) {
         if (is_quit(row)) return "System";
         if (is_cheat(row)) return "Cheats";
+        if (is_mod(row)) return "Mods";
         return nx::info(static_cast<Setting>(row)).section;
     }
 
@@ -269,6 +305,12 @@ namespace {
             return nx::cheats::supported(cheat_index(row))
                 ? "GameShark code from cheats.cht, written into the game's memory every frame while On."
                 : "This code rewrites the game's MIPS instructions, which the recompiled game no longer runs.";
+        }
+        if (is_mod(row)) {
+            const recomp::mods::ModDetails& mod = mods[mod_index(row)];
+            mod_description = mod.short_description.empty() ? mod.description : mod.short_description;
+            mod_description += " (version " + mod.version.to_string() + ")";
+            return mod_description.c_str();
         }
         return nx::info(static_cast<Setting>(row)).description;
     }
@@ -334,7 +376,7 @@ namespace {
         ImGui::PushTextWrapPos(0.0f);
         ImGui::TextUnformatted(row_description(selected));
         ImGui::PopTextWrapPos();
-        if (selected < SETTING_COUNT && nx::info(static_cast<Setting>(selected)).needs_restart) {
+        if (is_mod(selected) || (selected < SETTING_COUNT && nx::info(static_cast<Setting>(selected)).needs_restart)) {
             ImGui::PushStyleColor(ImGuiCol_Text, ACCENT);
             ImGui::TextUnformatted("* Applies the next time the game starts.");
             ImGui::PopStyleColor();

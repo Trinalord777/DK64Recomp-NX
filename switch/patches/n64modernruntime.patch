@@ -44,6 +44,65 @@ index af6f18d..d2fe729 100644
      if (std::filesystem::exists(filepath, ec)) {
          std::filesystem::copy_file(filepath, backup_path, std::filesystem::copy_options::overwrite_existing, ec);
          if (ec) {
+diff --git a/librecomp/src/mods.cpp b/librecomp/src/mods.cpp
+index 0f7de83..072d212 100644
+--- a/librecomp/src/mods.cpp
++++ b/librecomp/src/mods.cpp
+@@ -555,10 +555,23 @@ recomp::mods::GenericFunction recomp::mods::LiveRecompilerCodeHandle::get_functi
+     return GenericFunction{ recompiler_output->functions[func_index] };
+ }
+ 
++#ifdef __SWITCH__
++// Horizon never makes a code page executable again once it was writable: the jump goes in through a second,
++// writable mapping of the page (switch/jit_switch.c).
++extern "C" bool dk64nx_write_code(void* destination, const void* bytes, size_t size);
++#endif
++
+ void patch_func(recomp_func_t* target_func, recomp::mods::GenericFunction replacement_func) {
+     uint8_t* target_func_u8 = reinterpret_cast<uint8_t*>(target_func);
+     size_t offset = 0;
+ 
++#ifdef __SWITCH__
++    uint8_t patch_bytes[32];
++    auto write_bytes = [&](const void* bytes, size_t count) {
++        memcpy(patch_bytes + offset, bytes, count);
++        offset += count;
++    };
++#else
+     auto write_bytes = [&](const void* bytes, size_t count) {
+         memcpy(target_func_u8 + offset, bytes, count);
+         offset += count;
+@@ -566,6 +579,7 @@ void patch_func(recomp_func_t* target_func, recomp::mods::GenericFunction replac
+ 
+     uint64_t old_flags;
+     unprotect(target_func_u8, &old_flags);
++#endif
+ 
+ #if defined(IS_X86_64)
+     static const uint8_t movabs_rax[] = {0x48, 0xB8};
+@@ -589,14 +603,22 @@ void patch_func(recomp_func_t* target_func, recomp::mods::GenericFunction replac
+ #   error "Unsupported architecture"
+ #endif
+ 
++#ifdef __SWITCH__
++    dk64nx_write_code(target_func_u8, patch_bytes, offset);
++#else
+     protect(target_func_u8, old_flags);
++#endif
+ }
+ 
+ void unpatch_func(void* target_func, const recomp::mods::PatchData& data) {
++#ifdef __SWITCH__
++    dk64nx_write_code(target_func, data.replaced_bytes.data(), data.replaced_bytes.size());
++#else
+     uint64_t old_flags;
+     unprotect(target_func, &old_flags);
+     memcpy(target_func, data.replaced_bytes.data(), data.replaced_bytes.size());
+     protect(target_func, old_flags);
++#endif
+ }
+ 
+ void recomp::mods::ModContext::add_opened_mod(ModManifest&& manifest, config::Config&& config, std::vector<size_t>&& game_indices, std::vector<ModContentTypeId>&& detected_content_types, std::vector<char>&& thumbnail) {
 diff --git a/thirdparty/concurrentqueue/lightweightsemaphore.h b/thirdparty/concurrentqueue/lightweightsemaphore.h
 index 41ba094..30af8fd 100644
 --- a/thirdparty/concurrentqueue/lightweightsemaphore.h

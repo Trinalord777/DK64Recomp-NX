@@ -25,6 +25,9 @@ add_compile_options(-ffile-prefix-map=${ROOT_ABS}/=)
 set(FMT_OS OFF CACHE BOOL "" FORCE)
 
 add_subdirectory(${ROOT}/lib/N64ModernRuntime ${CMAKE_BINARY_DIR}/N64ModernRuntime)
+# Mods: LiveRecomp compiles their code with sljit into a libnx Jit (switch/sljit/sljitConfigPre.h, jit_switch.c).
+target_compile_definitions(LiveRecomp PRIVATE SLJIT_HAVE_CONFIG_PRE=1)
+target_include_directories(LiveRecomp BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/sljit)
 
 find_package(SDL2 REQUIRED)
 
@@ -123,6 +126,7 @@ add_executable(dk64recomp
     nx_settings.cpp
     nx_cheats.cpp
     nx_menu.cpp
+    jit_switch.c
     perf_switch.cpp
 )
 if(DK64NX_REMOTE)
