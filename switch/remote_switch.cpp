@@ -197,6 +197,18 @@ namespace {
             in >> words;
             return peek(static_cast<uint32_t>(std::stoul(address, nullptr, 16)), words);
         }
+        if (command == "setbits") {
+            // ORs a mask into one RDRAM byte (e.g. permanent flags), leaving its other bits alone.
+            std::string address; unsigned mask = 0;
+            if (!(in >> address >> std::hex >> mask) || mask > 0xFF) return "ERR usage: setbits 807ED054 40\n";
+            uint8_t* base = rdram.load();
+            const uint32_t offset = static_cast<uint32_t>(std::stoul(address, nullptr, 16)) & 0x1FFFFFFF;
+            if (base == nullptr || offset >= RDRAM_LIMIT) return "ERR bad address\n";
+            base[offset ^ 3] |= static_cast<uint8_t>(mask);
+            char out[32];
+            std::snprintf(out, sizeof(out), "OK now=%02X\n", base[offset ^ 3]);
+            return out;
+        }
         if (command == "status") {
             uint8_t* base = rdram.load();
             const uint32_t map = base ? *reinterpret_cast<uint32_t*>(base + (CURRENT_MAP & 0x1FFFFFFF)) : 0;
@@ -214,7 +226,7 @@ namespace {
             return previous < 0 ? "ERR unknown setting\n" : "OK previous=" + std::to_string(previous) + "\n";
         }
         if (command == "exp") return "OK\n" + experiments + "END\n";
-        return "ERR commands: press stick rstick shot peek status cpu timing gl exp\n";
+        return "ERR commands: press stick rstick shot peek setbits status cpu timing gl exp\n";
     }
 
     void serve_client(int fd) {
