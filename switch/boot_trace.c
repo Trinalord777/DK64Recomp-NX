@@ -19,6 +19,34 @@ void dk64nx_trace(const char* what) {
     fclose(file);
 }
 
+// Memory of this process that something outside the .nro still holds: pages mapped for the GPU (nvmap), lent to a
+// service (transfer memory, IPC), and code memory. Restart Game runs the next .nro in the same process, and the
+// console crashed on the 3rd instance; a census at each start shows what an earlier instance left behind.
+void dk64nx_trace_memory(const char* when) {
+    u64 device = 0, borrowed = 0, ipc = 0, code = 0, transfer = 0;
+    u64 address = 0;
+    for (;;) {
+        MemoryInfo info;
+        u32 page_info;
+        if (R_FAILED(svcQueryMemory(&info, &page_info, address))) break;
+        if (info.type != MemType_Unmapped) {
+            if (info.attr & MemAttr_IsDeviceMapped) device += info.size;
+            if (info.attr & MemAttr_IsBorrowed) borrowed += info.size;
+            if (info.attr & MemAttr_IsIpcMapped) ipc += info.size;
+            if (info.type == MemType_CodeWritable || info.type == MemType_CodeReadOnly) code += info.size;
+            if (info.type == MemType_TransferMem || info.type == MemType_TransferMemIsolated) transfer += info.size;
+        }
+        const u64 next = info.addr + info.size;
+        if (next <= address) break;
+        address = next;
+    }
+    char line[160];
+    snprintf(line, sizeof(line), "%s: device-mapped %llu KiB, borrowed %llu KiB, ipc %llu KiB, code memory %llu KiB, transfer %llu KiB",
+             when, (unsigned long long)(device >> 10), (unsigned long long)(borrowed >> 10), (unsigned long long)(ipc >> 10),
+             (unsigned long long)(code >> 10), (unsigned long long)(transfer >> 10));
+    dk64nx_trace(line);
+}
+
 void __appInit(void) {
     Result rc = smInitialize();
     if (R_FAILED(rc)) diagAbortWithResult(MAKERESULT(Module_Libnx, LibnxError_InitFail_SM));
@@ -56,6 +84,7 @@ void __appInit(void) {
     char line[64];
     snprintf(line, sizeof(line), "boot: process %llu, services up, opening the window", (unsigned long long)pid);
     dk64nx_trace(line);
+    dk64nx_trace_memory("boot: memory");
     if (&__nx_win_init) __nx_win_init();
     dk64nx_trace("boot: window open");
 }
@@ -92,6 +121,7 @@ void __libc_init_array(void) {
 }
 
 void __appExit(void) {
+    dk64nx_trace_memory("exit: memory");
     dk64nx_trace("exit: closing the window");
     if (&__nx_win_exit) __nx_win_exit();
     dk64nx_trace("exit: window closed, closing services");
