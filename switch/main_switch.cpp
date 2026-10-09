@@ -95,6 +95,10 @@ namespace {
 #endif
         // Launched from hbmenu: keep a log on the SD card instead.
         const std::string log_path = (DATA_DIR / "dk64recomp.log").string();
+        // The previous run's log survives one launch: after a crash, relaunching would otherwise erase its trace.
+        const std::string previous_path = (DATA_DIR / "dk64recomp.prev.log").string();
+        std::remove(previous_path.c_str());
+        std::rename(log_path.c_str(), previous_path.c_str());
         freopen(log_path.c_str(), "w", stdout);
         freopen(log_path.c_str(), "a", stderr);
         setvbuf(stdout, nullptr, _IONBF, 0);
