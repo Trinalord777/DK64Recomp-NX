@@ -3,9 +3,11 @@
 // long), otherwise those words would be decoded as RDP commands. Only what changes the 4:3 image
 // is implemented; interpolation and widescreen hints are skipped.
 // Encodings: lib/rt64/include/rt64_extended_gbi.h. Semantics: lib/rt64/src/gbi/rt64_gbi_extended.cpp.
+#include <cstring>
 #include <utility>
 #include <vector>
 
+#include "Config.h"
 #include "FrameBuffer.h"
 #include "GBI.h"
 #include "N64.h"
@@ -201,4 +203,24 @@ void RT64EX_AdjustRectX(f32* xs, u32 count, f32 scale, f32 width) {
         const f32 origin = xs[i] <= min_x ? left : right;
         xs[i] = origin + (xs[i] - origin) * scale;
     }
+}
+
+// Developer harness (remote_switch.cpp, "gl" command): change a GLideN64 setting while the game runs, to measure
+// what it costs. Returns the previous value, or -1 for an unknown name.
+extern "C" int dk64nx_gliden64_set(const char* name, int value) {
+    struct Field { const char* name; u32* value; };
+    const Field fields[] = {
+        {"copy", &config.frameBufferEmulation.copyToRDRAM},
+        {"aux", &config.frameBufferEmulation.copyAuxToRDRAM},
+        {"fromrdram", &config.frameBufferEmulation.copyFromRDRAM},
+        {"lod", &config.generalEmulation.enableLOD},
+    };
+    for (const Field& field : fields) {
+        if (strcmp(name, field.name) == 0) {
+            const int previous = static_cast<int>(*field.value);
+            *field.value = static_cast<u32>(value);
+            return previous;
+        }
+    }
+    return -1;
 }

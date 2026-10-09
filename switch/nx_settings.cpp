@@ -59,6 +59,9 @@ namespace {
          "Handheld only, while in the game. Docked GPU: the official docked GPU profile (768 MHz). Horizon OC: "
          "the docked CPU, GPU and RAM clocks set in Horizon OC.",
          0, {"Console Default", "Docked GPU in Handheld", "Horizon OC Docked Clocks"}},
+        {"Controls", "face_buttons", "Face Buttons",
+         "Flipped swaps the A and B buttons in the game (not in this menu).",
+         0, {"Normal", "Flipped"}},
     };
 
     std::atomic<int> values[COUNT];

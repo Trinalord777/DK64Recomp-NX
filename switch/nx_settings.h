@@ -23,6 +23,7 @@ namespace nx {
         Resolution,
         FrameRate,
         ClockProfile,
+        FaceButtons,
         Count
     };
 

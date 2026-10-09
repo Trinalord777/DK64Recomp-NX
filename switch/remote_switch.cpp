@@ -23,6 +23,7 @@
 #include "nx_pad.h"
 
 std::string dk64nx_run_experiments();
+extern "C" int dk64nx_gliden64_set(const char* name, int value);
 
 namespace {
     constexpr int PORT = 28280;
@@ -206,8 +207,14 @@ namespace {
         }
         if (command == "cpu") return cpu_load();
         if (command == "timing") return timing_report();
+        if (command == "gl") {
+            std::string name; int value = 0;
+            if (!(in >> name >> value)) return "ERR usage: gl copy 0\n";
+            const int previous = dk64nx_gliden64_set(name.c_str(), value);
+            return previous < 0 ? "ERR unknown setting\n" : "OK previous=" + std::to_string(previous) + "\n";
+        }
         if (command == "exp") return "OK\n" + experiments + "END\n";
-        return "ERR commands: press stick rstick shot peek status cpu timing exp\n";
+        return "ERR commands: press stick rstick shot peek status cpu timing gl exp\n";
     }
 
     void serve_client(int fd) {

@@ -7,6 +7,7 @@
 #include <SDL.h>
 
 #include "nx_pad.h"
+#include "nx_settings.h"
 #include "recompinput/recompinput.h"
 #include "ultramodern/input.hpp"
 
@@ -147,6 +148,11 @@ bool dk64nx_get_input(int controller_num, uint16_t* buttons, float* x, float* y)
     }
     NxPad pad;
     const bool connected = read_game_pad(&pad);
+    if (nx::get(nx::Setting::FaceButtons) != 0) {
+        const uint32_t a = pad.buttons & NX_A;
+        const uint32_t b = pad.buttons & NX_B;
+        pad.buttons = (pad.buttons & ~(NX_A | NX_B)) | (a ? NX_B : 0) | (b ? NX_A : 0);
+    }
     pad.buttons = start_filter.apply(pad.buttons, SDL_GetTicks64());
     *buttons = to_n64_buttons(pad);
     *x = pad.lx;
