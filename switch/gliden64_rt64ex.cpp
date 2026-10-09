@@ -8,6 +8,7 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstring>
+#include <map>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -300,9 +301,20 @@ namespace {
     size_t substitute_rank = 0;
     ptrdiff_t rank_shift = 0;   // previous rank - current rank of the last match
     bool camera_cut = false;
-    u32 saved_address = 0;      // color buffer holding the two copies of the last interpolated frame
+    u32 saved_address = 0;      // color buffer of the frame in its second pass
     FrameBuffer* saved_buffer = nullptr;
-    bool in_between_pending = false;
+
+    // In-between images waiting for the VI, one per color buffer (DK64 alternates two). A frame drawn into the
+    // buffer still on screen (no RDP freeze) waits for the VI to leave that buffer and come back: shown at once,
+    // it came before the previous frame's real image, a 75/25 step in motion.
+    struct InBetween {
+        FrameBuffer* buffer;
+        bool wait_for_other_buffer;
+    };
+    std::map<u32, InBetween> in_between;
+    FrameBuffer* in_between_shown = nullptr;
+    u32 frames_begun = 0;
+    std::map<u32, u32> frame_in_buffer;  // by color buffer address, for the dev harness
 
     struct MatchStats {
         u64 frames = 0;
@@ -429,11 +441,16 @@ extern "C" void dk64nx_interp_frame_begin() {
     }
     matrices_current.clear();
     camera_cut = false;
+    frames_begun++;
 }
 
 // After the first pass. False when this frame gets no in-between image.
 extern "C" bool dk64nx_interp_begin_second_pass() {
     FrameBuffer* buffer = frameBufferList().getCurrent();
+    if (buffer != nullptr) {
+        in_between.erase(buffer->m_startAddress);  // that image belonged to an older frame
+        frame_in_buffer[buffer->m_startAddress] = frames_begun;
+    }
     const bool jumped = camera_jumped();  // always measured, for the histograms
     if (camera_cut || jumped) {
         std::lock_guard lock{match_mutex};
@@ -498,7 +515,7 @@ extern "C" void dk64nx_interp_end_second_pass() {
         buffer->interpCopy(1, true);   // the in-between frame
         capture_copies(buffer);
         buffer->interpCopy(0, false);  // the real one back
-        in_between_pending = true;
+        in_between[buffer->m_startAddress] = {buffer, frameBufferList().findBuffer(*REG.VI_ORIGIN) == buffer};
         std::lock_guard lock{match_mutex};
         match_stats.interpolated++;
     }
@@ -507,21 +524,39 @@ extern "C" void dk64nx_interp_end_second_pass() {
 // VI: when the frame about to be shown has an in-between image, put it in the color buffer and return true; the
 // caller presents it, then calls dk64nx_interp_present_done to put the real frame back for the next VI.
 extern "C" bool dk64nx_interp_present_in_between(u32 origin) {
-    if (!in_between_pending) return false;
-    FrameBuffer* buffer = saved_frame();
-    if (buffer == nullptr) {
-        in_between_pending = false;
-        return false;
+    FrameBuffer* shown = frameBufferList().findBuffer(origin);
+    for (auto& [address, pending] : in_between) {
+        if (pending.buffer != shown) pending.wait_for_other_buffer = false;
     }
+    if (shown == nullptr) return false;
     // Until the VI shows that frame's buffer: the swap may land a VI later than the display list.
-    if (frameBufferList().findBuffer(origin) != buffer) return false;
-    in_between_pending = false;
-    buffer->interpCopy(1, false);
+    const auto pending = in_between.find(shown->m_startAddress);
+    if (pending == in_between.end() || pending->second.wait_for_other_buffer) return false;
+    const bool same_buffer = pending->second.buffer == shown;  // not recreated at that address since
+    in_between.erase(pending);
+    if (!same_buffer) return false;
+    shown->interpCopy(1, false);
+    in_between_shown = shown;
     return true;
 }
 
+// Dev harness: the color buffer the last display list drew into, 0 when none.
+extern "C" u32 dk64nx_interp_current_buffer() {
+    const FrameBuffer* buffer = frameBufferList().getCurrent();
+    return buffer == nullptr ? 0 : buffer->m_startAddress;
+}
+
+// Dev harness: the position of the image the VI presents from origin, in half frames (in-between of frame n: 2n - 1).
+extern "C" u32 dk64nx_interp_shown_position(u32 origin, bool in_between_image) {
+    const FrameBuffer* buffer = frameBufferList().findBuffer(origin);
+    if (buffer == nullptr) return 0;
+    const auto frame = frame_in_buffer.find(buffer->m_startAddress);
+    return frame == frame_in_buffer.end() ? 0 : 2 * frame->second - (in_between_image ? 1 : 0);
+}
+
 extern "C" void dk64nx_interp_present_done() {
-    if (FrameBuffer* buffer = saved_frame()) buffer->interpCopy(0, false);
+    if (in_between_shown != nullptr) in_between_shown->interpCopy(0, false);
+    in_between_shown = nullptr;
 }
 
 // Since the start: frames, frames with an in-between image, camera cuts, matrices left unmatched in second passes.

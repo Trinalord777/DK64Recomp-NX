@@ -34,10 +34,19 @@ extern uint64_t dk64nx_vblank_ring[];                // vsync_switch.cpp, 512 en
 extern std::atomic<uint32_t> dk64nx_vblank_count;
 extern uint64_t dk64nx_dl_ring[];                    // render_gliden64.cpp, 512 entries
 extern std::atomic<uint32_t> dk64nx_dl_count;
+extern uint32_t dk64nx_dl_buffer_ring[];              // render_gliden64.cpp, 512 entries
+extern uint32_t dk64nx_dl_us_ring[];
+extern uint64_t dk64nx_swap_ring[];                   // events.cpp, 256 entries
+extern uint32_t dk64nx_swap_buffer_ring[];
+extern std::atomic<uint32_t> dk64nx_swap_count;
 // Screen updates the graphics thread skipped because a newer one was already queued, since the start (events.cpp).
 extern std::atomic<int> dk64nx_dropped_screen_updates;
 extern "C" int dk64nx_interp_stats(char* out, int size);
 extern "C" bool dk64nx_interp_capture(uint32_t* width, uint32_t* height, const uint8_t** real, const uint8_t** in_between);
+
+// Graphics thread: the image of the present under way, in half frames (render_gliden64.cpp).
+uint32_t dk64nx_shown_position = 0;
+uint32_t dk64nx_shown_origin = 0;
 
 namespace {
     constexpr int PORT = 28280;
@@ -113,12 +122,16 @@ namespace {
     // Ticks of the last presents, next to the vblanks of vsync_switch.cpp (frames command).
     constexpr int PRESENT_RING = 512;
     uint64_t present_ring[PRESENT_RING];
+    uint32_t shown_ring[PRESENT_RING];  // the image of each present, in half frames (render_gliden64.cpp)
+    uint32_t origin_ring[PRESENT_RING];
     std::atomic<uint32_t> present_count{0};
 
     void count_present_interval() {
         const uint64_t now = armGetSystemTick();
         const uint32_t index = present_count.load();
         present_ring[index % PRESENT_RING] = now;
+        shown_ring[index % PRESENT_RING] = dk64nx_shown_position;
+        origin_ring[index % PRESENT_RING] = dk64nx_shown_origin;
         present_count = index + 1;
         if (last_present_tick != 0) {
             const uint64_t us = armTicksToNs(now - last_present_tick) / 1000;
@@ -129,20 +142,46 @@ namespace {
         last_present_tick = now;
     }
 
-    // The last 300 vblanks and presents, in microseconds since the first of them: "OK v=... p=...".
+    // The last 300 vblanks and presents, in microseconds since the first of them, and the image of each present
+    // in half frames: "OK v=... p=... s=...".
     std::string frames_report() {
         constexpr int COUNT = 300;
         const uint32_t vblanks = dk64nx_vblank_count.load();
         const uint32_t presents = present_count.load();
-        if (vblanks < COUNT || presents < COUNT) return "ERR not enough vblanks or presents (vsync pacing on?)\n";
-        const uint64_t origin = std::min(dk64nx_vblank_ring[(vblanks - COUNT) % 512], present_ring[(presents - COUNT) % PRESENT_RING]);
+        if (presents < COUNT) return "ERR not enough presents\n";
+        // No vblanks when the timer paces the VIs (30 fps, or no vsync event): v= stays empty.
+        const bool paced = vblanks >= COUNT;
+        const uint64_t first_present = present_ring[(presents - COUNT) % PRESENT_RING];
+        const uint64_t origin = paced ? std::min(dk64nx_vblank_ring[(vblanks - COUNT) % 512], first_present) : first_present;
         std::string out = "OK v=";
-        for (uint32_t i = vblanks - COUNT; i < vblanks; i++) {
+        for (uint32_t i = paced ? vblanks - COUNT : vblanks; i < vblanks; i++) {
             out += std::to_string(armTicksToNs(dk64nx_vblank_ring[i % 512] - origin) / 1000) + ",";
         }
         out += " p=";
         for (uint32_t i = presents - COUNT; i < presents; i++) {
             out += std::to_string(armTicksToNs(present_ring[i % PRESENT_RING] - origin) / 1000) + ",";
+        }
+        out += " s=";
+        for (uint32_t i = presents - COUNT; i < presents; i++) out += std::to_string(shown_ring[i % PRESENT_RING]) + ",";
+        out += " o=";
+        for (uint32_t i = presents - COUNT; i < presents; i++) out += std::to_string(origin_ring[i % PRESENT_RING]) + ",";
+        // The display lists of the same window: start in microseconds (negative before it), color buffer, in-between.
+        out += " d=";
+        const uint32_t dls = dk64nx_dl_count.load();
+        for (uint32_t i = dls - std::min<uint32_t>(dls, 200); i < dls; i++) {
+            const int64_t us = (static_cast<int64_t>(armTicksToNs(dk64nx_dl_ring[i % 512])) -
+                                static_cast<int64_t>(armTicksToNs(origin))) / 1000;
+            const uint32_t buffer = dk64nx_dl_buffer_ring[i % 512];
+            out += std::to_string(us) + ":" + std::to_string(buffer & 0x7FFFFFFF) + ":" + std::to_string(buffer >> 31) + ":" +
+                   std::to_string(dk64nx_dl_us_ring[i % 512]) + ",";
+        }
+        // The game's swaps (osViSwapBuffer): time, buffer.
+        out += " w=";
+        const uint32_t swaps = dk64nx_swap_count.load();
+        for (uint32_t i = swaps - std::min<uint32_t>(swaps, 200); i < swaps; i++) {
+            const int64_t us = (static_cast<int64_t>(armTicksToNs(dk64nx_swap_ring[i % 256])) -
+                                static_cast<int64_t>(armTicksToNs(origin))) / 1000;
+            out += std::to_string(us) + ":" + std::to_string(dk64nx_swap_buffer_ring[i % 256]) + ",";
         }
         return out + "\n";
     }

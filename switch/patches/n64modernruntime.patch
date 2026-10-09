@@ -187,10 +187,21 @@ index 8ca779e..f415d72 100644
  #else
      std::quick_exit(exit_status);
 diff --git a/ultramodern/src/events.cpp b/ultramodern/src/events.cpp
-index 17d7a47..34e9d6a 100644
+index 17d7a47..07ba9b9 100644
 --- a/ultramodern/src/events.cpp
 +++ b/ultramodern/src/events.cpp
-@@ -184,6 +184,16 @@ extern moodycamel::LightweightSemaphore graphics_shutdown_ready;
+@@ -17,6 +17,10 @@
+ 
+ #include "ultramodern/rsp.hpp"
+ #include "ultramodern/renderer_context.hpp"
++#ifdef __SWITCH__
++#include <switch/types.h>
++#include <switch/arm/counter.h>
++#endif
+ 
+ static ultramodern::events::callbacks_t events_callbacks{};
+ 
+@@ -184,6 +188,16 @@ extern moodycamel::LightweightSemaphore graphics_shutdown_ready;
  
  void set_dummy_vi(bool odd);
  
@@ -207,7 +218,7 @@ index 17d7a47..34e9d6a 100644
  void vi_thread_func() {
      ultramodern::set_native_thread_name("VI Thread");
      // This thread should be prioritized over every other thread in the application, as it's what allows
-@@ -209,7 +219,13 @@ void vi_thread_func() {
+@@ -209,7 +223,13 @@ void vi_thread_func() {
              // printf("Skipping the next VI wait\n");
              next = std::chrono::high_resolution_clock::now();
          }
@@ -221,15 +232,31 @@ index 17d7a47..34e9d6a 100644
          auto time_now = ultramodern::time_since_start();
          // Calculate how many VIs have passed
          uint64_t new_total_vis = (time_now * (60 * ultramodern::get_speed_multiplier()) / 1000ms) + 1;
-@@ -229,6 +245,7 @@ void vi_thread_func() {
+@@ -227,12 +247,23 @@ void vi_thread_func() {
+             events_context.action_queue.enqueue(DummyWorkloadAction{events_context.vi.get_next_state()->framebuffer});
+         }
  
++#ifdef __SWITCH__
++        // Switch: the screen update carries the registers of this VI (the buffer the N64 shows until the next one),
++        // queued before the display list the game builds after this retrace. Queued before the VI update, it showed
++        // each buffer one VI late, and DK64 (no RDP freeze) had already drawn its next frame into that buffer for the
++        // second VI: at 60 fps the real image of each frame was lost or its in-between came too early.
++        events_context.vi.update_vi();
++        pending_screen_updates.fetch_add(1);
++        events_context.action_queue.enqueue(ScreenUpdateAction{ events_context.vi.regs });
++#else
          // Queue a screen update for the graphics thread with the current VI register state.
          // Doing this before the VI update is equivalent to updating the screen after the previous frame's scanout finished.
 +        pending_screen_updates.fetch_add(1);
          events_context.action_queue.enqueue(ScreenUpdateAction{ events_context.vi.regs });
  
          // Update VI registers and swap VI modes.
-@@ -386,6 +403,17 @@ void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_re
+         events_context.vi.update_vi();
++#endif
+ 
+         // If the game has started, handle sending VI and AI events.
+         if (ultramodern::is_game_started()) {
+@@ -386,6 +417,17 @@ void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_re
              }
              else if (const auto* screen_update_action = std::get_if<ScreenUpdateAction>(&action)) {
                  events_context.vi.update_screen_regs = screen_update_action->regs;
@@ -247,6 +274,29 @@ index 17d7a47..34e9d6a 100644
                  renderer_context->update_screen();
                  display_refresh_rate = renderer_context->get_display_framerate();
                  resolution_scale = renderer_context->get_resolution_scale();
+@@ -459,9 +501,22 @@ void set_dummy_vi(bool odd) {
+     }
+ }
+ 
++#ifdef __SWITCH__
++// Dev harness (remote_switch.cpp frames command): when the game swapped to which buffer.
++uint64_t dk64nx_swap_ring[256];
++uint32_t dk64nx_swap_buffer_ring[256];
++std::atomic<uint32_t> dk64nx_swap_count{0};
++#endif
++
+ extern "C" void osViSwapBuffer(RDRAM_ARG PTR(void) frameBufPtr) {
+     std::lock_guard lock{ events_context.message_mutex };
+     events_context.vi.get_next_state()->framebuffer = frameBufPtr;
++#ifdef __SWITCH__
++    const uint32_t index = dk64nx_swap_count.load();
++    dk64nx_swap_ring[index % 256] = armGetSystemTick();
++    dk64nx_swap_buffer_ring[index % 256] = osVirtualToPhysical(frameBufPtr);
++    dk64nx_swap_count = index + 1;
++#endif
+ }
+ 
+ extern "C" void osViSetMode(RDRAM_ARG PTR(OSViMode) mode_) {
 diff --git a/ultramodern/src/mesgqueue.cpp b/ultramodern/src/mesgqueue.cpp
 index 9944a02..4334211 100644
 --- a/ultramodern/src/mesgqueue.cpp

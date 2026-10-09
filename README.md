@@ -99,7 +99,8 @@ the real image and the in-between one) and the screen refreshes per second that 
 **60 fps (interpolated)** is experimental: the game still runs at its original 30 fps, and an in-between image,
 with every object halfway between two of its frames, is drawn and shown between them, as the PC version does with
 RT64. It adds one frame of latency. Camera cuts are not interpolated. Each image waits for the screen's refresh:
-measured in play, 95-100% of the intervals between images fall within 15.5-18 ms (one 60 Hz refresh).
+measured walking in DK Isles at the stock 1020 MHz, 297 of 299 consecutive images move forward by exactly half a
+frame (in-between, then real), none goes back, and 1 refresh in 5 s repeats an image.
 
 **Texture LOD** is off by default: GLideN64's level of detail emulation tints the Kongs' eye whites pink and blurs
 their pupils, as reported in
