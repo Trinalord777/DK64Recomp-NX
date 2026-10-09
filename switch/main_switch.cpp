@@ -49,6 +49,7 @@ void dk64nx_perf_stop();
 #ifdef DK64NX_REMOTE
 void dk64nx_remote_start();
 void dk64nx_remote_stop();
+extern "C" void dk64nx_trace(const char* what);
 #endif
 bool dk64nx_get_input(int controller_num, uint16_t* buttons, float* x, float* y);
 ultramodern::input::connected_device_info_t dk64nx_get_connected_device_info(int controller_num);
@@ -315,6 +316,9 @@ namespace {
 const char* dk64nx_program_path = nullptr;
 
 int main(int argc, char** argv) {
+#ifdef DK64NX_REMOTE
+    dk64nx_trace("main: start");
+#endif
     if (argc > 0) dk64nx_program_path = argv[0];
     std::set_terminate(log_terminate);
     init_logging();
@@ -469,5 +473,8 @@ int main(int argc, char** argv) {
     // destructors, which may wait on threads that are gone, and still runs libnx's cleanup before returning to the
     // loader (which then starts the .nro again after Restart Game).
     fflush(nullptr);
+#ifdef DK64NX_REMOTE
+    dk64nx_trace("main: _exit");
+#endif
     _exit(EXIT_SUCCESS);
 }

@@ -131,7 +131,7 @@ add_executable(dk64recomp
     perf_switch.cpp
 )
 if(DK64NX_REMOTE)
-    target_sources(dk64recomp PRIVATE remote_switch.cpp experiments_switch.cpp)
+    target_sources(dk64recomp PRIVATE remote_switch.cpp experiments_switch.cpp boot_trace.c)
     target_compile_definitions(dk64recomp PRIVATE DK64NX_REMOTE=1)
 endif()
 target_include_directories(dk64recomp PRIVATE
