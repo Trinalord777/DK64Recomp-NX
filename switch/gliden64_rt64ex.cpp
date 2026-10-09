@@ -309,6 +309,8 @@ namespace {
     }
 
     bool substituting = false;  // second pass: matrices are replaced by rank
+    size_t frame_unmatched = 0;  // in this second pass
+    bool frame_camera_unmatched = false;
     size_t substitute_rank = 0;
     ptrdiff_t rank_shift = 0;   // previous rank - current rank of the last match
     bool camera_cut = false;
@@ -338,6 +340,8 @@ namespace {
         u64 camera_cuts = 0;
         u64 over_budget = 0;    // frames whose first pass was too long for a second one
         u64 unmatched = 0;      // second-pass matrices left as they are
+        u64 mostly_unmatched = 0;  // in-between images where most matrices were left as they are (no motion)
+        u64 camera_unmatched = 0;  // in-between images whose projection (camera) matrix was left as it is
         u64 projection_rotation[EDGE_COUNT + 1] = {};
         u64 projection_translation[EDGE_COUNT + 1] = {};
     } match_stats;
@@ -374,8 +378,24 @@ namespace {
     // The previous frame's twin of the current frame's matrix of this rank, or -1: the expected rank first, then the
     // nearest ranks outwards. Load order, not likeness, decides: the DK Rap's five similar skeletons stand side by
     // side, and a bone often looks more like the neighbour's bone than like itself one frame earlier.
+    // The k-th projection matrix of the previous frame for the k-th of this one, as camera_jumped pairs them. The
+    // camera's view matrix holds -R * eye, which moves by more than an object's distance limit when the camera turns
+    // far from the map's origin: matched by distance, it was left unmatched in 131-159 of ~265 in-between images while
+    // running in Creepy Castle's basement (0 paired this way), and the background did not move in those images: the
+    // same picture twice in a row on screen, a 30 fps stutter in the middle of 60.
+    ptrdiff_t projection_twin(size_t rank) {
+        size_t order = 0;
+        for (size_t i = 0; i < rank; i++) order += (matrices_current[i].param & G_MTX_PROJECTION) != 0;
+        for (size_t j = 0; j < matrices_previous.size(); j++) {
+            if (!(matrices_previous[j].param & G_MTX_PROJECTION)) continue;
+            if (order-- == 0) return matrices_previous[j].param == matrices_current[rank].param ? static_cast<ptrdiff_t>(j) : -1;
+        }
+        return -1;
+    }
+
     ptrdiff_t find_twin(size_t rank) {
         const LoadedMatrix& now = matrices_current[rank];
+        if (now.param & G_MTX_PROJECTION) return projection_twin(rank);
         const ptrdiff_t expected = static_cast<ptrdiff_t>(rank) + rank_shift;
         const ptrdiff_t count = static_cast<ptrdiff_t>(matrices_previous.size());
         for (ptrdiff_t offset = 0; offset <= static_cast<ptrdiff_t>(MATCH_WINDOW); offset++) {
@@ -429,6 +449,8 @@ void RT64EX_OnMatrix(u32 address, u8 param, f32 mtx[4][4]) {
     if (twin < 0) {
         std::lock_guard lock{match_mutex};
         match_stats.unmatched++;
+        frame_unmatched++;
+        if (param & G_MTX_PROJECTION) frame_camera_unmatched = true;
         return;
     }
     rank_shift = twin - static_cast<ptrdiff_t>(rank);
@@ -479,6 +501,8 @@ extern "C" bool dk64nx_interp_begin_second_pass(u32 first_pass_us) {
     saved_buffer = buffer;
     saved_address = buffer->m_startAddress;
     substituting = true;
+    frame_unmatched = 0;
+    frame_camera_unmatched = false;
     substitute_rank = 0;
     rank_shift = 0;
     return true;
@@ -535,6 +559,8 @@ extern "C" void dk64nx_interp_end_second_pass() {
         in_between[buffer->m_startAddress] = {buffer, frameBufferList().findBuffer(*REG.VI_ORIGIN) == buffer};
         std::lock_guard lock{match_mutex};
         match_stats.interpolated++;
+        match_stats.mostly_unmatched += frame_unmatched * 2 > matrices_current.size();
+        match_stats.camera_unmatched += frame_camera_unmatched;
     }
 }
 
@@ -604,9 +630,9 @@ extern "C" int dk64nx_interp_stats(char* out, int size) {
              (unsigned long long)s.projection_translation[0], (unsigned long long)s.projection_translation[1],
              (unsigned long long)s.projection_translation[2], (unsigned long long)s.projection_translation[3],
              (unsigned long long)s.projection_translation[4], (unsigned long long)s.projection_translation[5]);
-    return snprintf(out, size, "frames=%llu interpolated=%llu cuts=%llu over_budget=%llu unmatched/frame=%.1f matrices/frame=%.0f equal=%.1f%% close=%.1f%% far=%.1f%% count_changed=%llu proj_rot(<.05/.1/.25/.5/1/more)=%s proj_trans(<50/200/1k/5k/20k/more)=%s",
+    return snprintf(out, size, "frames=%llu interpolated=%llu cuts=%llu over_budget=%llu mostly_unmatched=%llu camera_unmatched=%llu unmatched/frame=%.1f matrices/frame=%.0f equal=%.1f%% close=%.1f%% far=%.1f%% count_changed=%llu proj_rot(<.05/.1/.25/.5/1/more)=%s proj_trans(<50/200/1k/5k/20k/more)=%s",
                     (unsigned long long)s.frames, (unsigned long long)s.interpolated, (unsigned long long)s.camera_cuts,
-                    (unsigned long long)s.over_budget, s.interpolated ? double(s.unmatched) / s.interpolated : 0.0,
+                    (unsigned long long)s.over_budget, (unsigned long long)s.mostly_unmatched, (unsigned long long)s.camera_unmatched, s.interpolated ? double(s.unmatched) / s.interpolated : 0.0,
                     s.frames ? double(s.matrices) / s.frames : 0.0,
                     pairs ? 100.0 * s.equal / pairs : 0.0, pairs ? 100.0 * s.close / pairs : 0.0,
                     pairs ? 100.0 * s.far / pairs : 0.0, (unsigned long long)s.count_changed, rotation, translation);

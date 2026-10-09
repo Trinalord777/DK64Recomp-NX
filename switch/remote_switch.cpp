@@ -374,6 +374,13 @@ namespace {
         if (command == "frames") return frames_report();
         if (command == "dls") return dls_report();
         if (command == "clocks") return "OK " + nx::dev::read_clocks() + "\n";
+        if (command == "warp") {
+            int map = 0, exit = 0;
+            if (!(in >> map) || map < 0 || map > 0xFF) return "ERR usage: warp <map> [exit]\n";
+            in >> exit;
+            nx::dev::request_warp(map, exit & 0xFF);
+            return "OK\n";
+        }
         if (command == "restart") {
             dk64nx_menu_request_restart();
             return "OK\n";

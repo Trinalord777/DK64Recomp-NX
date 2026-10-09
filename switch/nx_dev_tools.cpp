@@ -211,6 +211,10 @@ namespace {
 int nx::dev::count() { return static_cast<int>(sizeof(TOOLS) / sizeof(TOOLS[0])); }
 const nx::dev::Tool& nx::dev::tool(int index) { return TOOLS[index]; }
 
+void nx::dev::request_warp(int map, int exit) {
+    pending_warp = map << 8 | exit;
+}
+
 std::string nx::dev::read_clocks() {
     if (R_FAILED(clkrstInitialize())) return "clkrst unavailable";
     const PcvModuleId modules[] = {PcvModuleId_CpuBus, PcvModuleId_GPU, PcvModuleId_EMC};
