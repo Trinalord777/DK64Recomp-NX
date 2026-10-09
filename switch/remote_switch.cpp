@@ -24,6 +24,7 @@
 
 std::string dk64nx_run_experiments();
 extern "C" int dk64nx_gliden64_set(const char* name, int value);
+extern "C" int dk64nx_interp_stats(char* out, int size);
 
 namespace {
     constexpr int PORT = 28280;
@@ -219,6 +220,11 @@ namespace {
         }
         if (command == "cpu") return cpu_load();
         if (command == "timing") return timing_report();
+        if (command == "mtx") {
+            char out[256];
+            dk64nx_interp_stats(out, sizeof(out));
+            return std::string("OK ") + out + "\n";
+        }
         if (command == "gl") {
             std::string name; int value = 0;
             if (!(in >> name >> value)) return "ERR usage: gl copy 0\n";

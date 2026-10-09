@@ -120,10 +120,10 @@ index 9f7796f..552aa08 100644
  
  	m_rect[0].bc0 = 0.0f;
 diff --git a/src/RSP.h b/src/RSP.h
-index bf3ba27..eaa2fc3 100644
+index bf3ba27..f991c2b 100644
 --- a/src/RSP.h
 +++ b/src/RSP.h
-@@ -22,7 +22,19 @@ extern RSPInfo RSP;
+@@ -22,7 +22,21 @@ extern RSPInfo RSP;
  extern u32 DepthClearColor;
  extern u32 rectDepthBufferCopyFrame;
  
@@ -141,6 +141,8 @@ index bf3ba27..eaa2fc3 100644
 +f32 RT64EX_OriginX(u16 origin, f32 width);
 +bool RT64EX_ShouldAdjustRect(bool narrow);
 +void RT64EX_AdjustRectX(f32* xs, u32 count, f32 scale, f32 width);
++// Every matrix gSPMatrix loads, for frame interpolation (switch/gliden64_rt64ex.cpp).
++void RT64EX_OnMatrix(u32 address, u8 param, const f32 mtx[4][4]);
  
  void RSP_Init();
  void RSP_ProcessDList();
@@ -157,6 +159,19 @@ index a2805c4..44881c1 100644
  	gDP.scissor.mode = mode;
  	gDP.scissor.xh = xh;
  	gDP.scissor.yh = yh;
+diff --git a/src/gSP.cpp b/src/gSP.cpp
+index ab5ada9..e37d0e8 100644
+--- a/src/gSP.cpp
++++ b/src/gSP.cpp
+@@ -176,6 +176,8 @@ void gSPMatrix( u32 matrix, u8 param )
+ 		return;
+ 	}
+ 
++	RT64EX_OnMatrix(address, param, mtx);
++
+ 	if (param & G_MTX_PROJECTION) {
+ 		if (param & G_MTX_LOAD)
+ 			CopyMatrix( gSP.matrix.projection, mtx );
 diff --git a/src/uCodes/F3DEX2.cpp b/src/uCodes/F3DEX2.cpp
 index dc98298..b30ee8b 100644
 --- a/src/uCodes/F3DEX2.cpp

@@ -3,7 +3,10 @@
 // long), otherwise those words would be decoded as RDP commands. Only what changes the 4:3 image
 // is implemented; interpolation and widescreen hints are skipped.
 // Encodings: lib/rt64/include/rt64_extended_gbi.h. Semantics: lib/rt64/src/gbi/rt64_gbi_extended.cpp.
+#include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -224,4 +227,80 @@ extern "C" int dk64nx_gliden64_set(const char* name, int value) {
         }
     }
     return -1;
+}
+
+// Frame interpolation, step 1: record the matrices of each display list and measure how many match the previous
+// frame's matrix of the same rank (same object, slightly moved), which is what interpolating by load order relies
+// on. Read through the harness ("mtx" command).
+namespace {
+    struct LoadedMatrix {
+        u32 address;
+        u8 param;
+        f32 m[4][4];
+    };
+    std::vector<LoadedMatrix> matrices_current;
+    std::vector<LoadedMatrix> matrices_previous;
+
+    struct MatchStats {
+        u64 frames = 0;
+        u64 matrices = 0;
+        u64 equal = 0;
+        u64 close = 0;
+        u64 far = 0;
+        u64 count_changed = 0;
+    } match_stats;
+    std::mutex match_mutex;
+
+    constexpr f32 CLOSE_TRANSLATION = 50.0f;  // world units the same object may move in one frame
+    constexpr f32 CLOSE_ROTATION = 0.3f;      // largest change of a rotation/scale element
+
+    void compare_frames() {
+        const size_t count = std::min(matrices_previous.size(), matrices_current.size());
+        std::lock_guard lock{match_mutex};
+        match_stats.frames++;
+        match_stats.matrices += matrices_current.size();
+        match_stats.count_changed += matrices_previous.size() != matrices_current.size();
+        for (size_t i = 0; i < count; i++) {
+            const LoadedMatrix& a = matrices_previous[i];
+            const LoadedMatrix& b = matrices_current[i];
+            if (a.param == b.param && memcmp(a.m, b.m, sizeof(a.m)) == 0) {
+                match_stats.equal++;
+                continue;
+            }
+            f32 translation = 0.0f;
+            f32 rotation = 0.0f;
+            for (int r = 0; r < 3; r++) {
+                translation = std::max(translation, std::fabs(a.m[3][r] - b.m[3][r]));
+                for (int c = 0; c < 3; c++) rotation = std::max(rotation, std::fabs(a.m[r][c] - b.m[r][c]));
+            }
+            const bool close = a.param == b.param && translation < CLOSE_TRANSLATION && rotation < CLOSE_ROTATION;
+            (close ? match_stats.close : match_stats.far)++;
+        }
+    }
+}
+
+void RT64EX_OnMatrix(u32 address, u8 param, const f32 mtx[4][4]) {
+    LoadedMatrix loaded{address, param, {}};
+    memcpy(loaded.m, mtx, sizeof(loaded.m));
+    matrices_current.push_back(loaded);
+}
+
+// Graphics thread, before each display list.
+extern "C" void dk64nx_interp_frame_begin() {
+    if (!matrices_current.empty()) {
+        compare_frames();
+        std::swap(matrices_previous, matrices_current);
+    }
+    matrices_current.clear();
+}
+
+extern "C" int dk64nx_interp_stats(char* out, int size) {
+    std::lock_guard lock{match_mutex};
+    const MatchStats s = match_stats;
+    match_stats = {};
+    const double pairs = static_cast<double>(s.equal + s.close + s.far);
+    return snprintf(out, size, "frames=%llu matrices/frame=%.0f equal=%.1f%% close=%.1f%% far=%.1f%% count_changed=%llu",
+                    (unsigned long long)s.frames, s.frames ? double(s.matrices) / s.frames : 0.0,
+                    pairs ? 100.0 * s.equal / pairs : 0.0, pairs ? 100.0 * s.close / pairs : 0.0,
+                    pairs ? 100.0 * s.far / pairs : 0.0, (unsigned long long)s.count_changed);
 }

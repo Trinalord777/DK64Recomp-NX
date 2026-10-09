@@ -27,6 +27,7 @@ void dk64nx_remote_time(int kind, uint64_t start_tick);
 #define DK64NX_TIME(kind, start)
 #endif
 bool dk64nx_front_buffer_redrawn(uint32_t origin);
+extern "C" void dk64nx_interp_frame_begin();
 
 namespace {
     // OSTask is copied where the RSP boot code leaves it, at the end of DMEM.
@@ -152,6 +153,7 @@ namespace {
             // HALT | BROKE | TASKDONE, set before ProcessDList as GFX_INFO v2 requires.
             sp_status_reg = 0x0203;
             [[maybe_unused]] const uint64_t start = armGetSystemTick();
+            dk64nx_interp_frame_begin();
             ProcessDList();
             DK64NX_TIME(0, start);
         }
