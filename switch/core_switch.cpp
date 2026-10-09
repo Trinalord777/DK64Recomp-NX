@@ -251,6 +251,10 @@ m64p_error nx_VidExt_GL_GetAttribute(m64p_GLattr attr, int* value) {
     return SDL_GL_GetAttribute(sdl_attr, value) == 0 ? M64ERR_SUCCESS : M64ERR_SYSTEM_FAIL;
 }
 
+// Swap interval at 60 fps (interpolated). 0 never blocks the graphics thread; 1 waits for the vblank, which paces
+// presents to the display. The dev harness changes it (swap command) to measure both.
+int dk64nx_fast_swap_interval = 0;
+
 void dk64nx_menu_on_swap(int width, int height);
 int dk64nx_gliden64_set(const char* name, int value);
 #ifdef DK64NX_REMOTE
@@ -263,11 +267,16 @@ m64p_error nx_VidExt_GL_SwapBuffers(void) {
     // of each frame back to RDRAM (double-buffered read-back), which stalled ProcessDList for ~12 ms (20 ms -> 7.3 ms
     // per pass in game). DK64's pause and transitions look the same without it. At 30 fps both stay as they were.
     static bool fast = false;
+    static int applied_interval = -1;
     const bool wants_fast = nx::interpolated_60();
     if (wants_fast != fast) {
-        SDL_GL_SetSwapInterval(wants_fast ? 0 : swap_interval);
         dk64nx_gliden64_set("copy", wants_fast ? 0 : 2);  // 2: GLideN64's default, ctDoubleBuffer
         fast = wants_fast;
+    }
+    const int interval = wants_fast ? dk64nx_fast_swap_interval : swap_interval;
+    if (interval != applied_interval) {
+        SDL_GL_SetSwapInterval(interval);
+        applied_interval = interval;
     }
     dk64nx_menu_on_swap(SCREEN_WIDTH, SCREEN_HEIGHT);
 #ifdef DK64NX_REMOTE
