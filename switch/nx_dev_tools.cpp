@@ -12,6 +12,8 @@
 #include "nx_settings.h"
 
 extern "C" void dk64nx_interp_totals(uint64_t out[4]);  // gliden64_rt64ex.cpp
+extern "C" bool dk64nx_interp_early_enabled();
+extern "C" int dk64nx_gliden64_set(const char* name, int value);
 
 namespace {
     // Game state, by decomp name.
@@ -195,6 +197,12 @@ namespace {
              flag_choice = (flag_choice + direction + PERMANENT_FLAG_COUNT) % PERMANENT_FLAG_COUNT;
          }},
 
+        {"Interpolation", "Present Both Images at Once",
+         "At 60 fps. Off: the in-between image and the real one are shown on two VIs, the real one waiting for the "
+         "next. On: both go to the display as soon as they are drawn and it shows one per refresh, so a frame may "
+         "take 33 ms to draw instead of 16.7 ms (stock CPU: 16-19 ms in DK Isles). Compare them while moving.",
+         [] { return std::string(dk64nx_interp_early_enabled() ? "On" : "Off"); },
+         [](int, bool) { dk64nx_gliden64_set("early", dk64nx_interp_early_enabled() ? 0 : 1); }},
         {"Interpolation", "Frames With an In-Between Image",
          "At 60 fps, the share of the game's frames that got an in-between image over the last second. Camera cuts "
          "and loading screens get none.",

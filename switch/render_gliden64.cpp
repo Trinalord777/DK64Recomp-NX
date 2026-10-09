@@ -34,6 +34,9 @@ extern "C" bool dk64nx_interp_begin_second_pass();
 extern "C" void dk64nx_interp_end_second_pass();
 extern "C" bool dk64nx_interp_present_in_between(uint32_t origin);
 extern "C" void dk64nx_interp_present_done();
+extern "C" bool dk64nx_interp_early_enabled();
+extern "C" bool dk64nx_interp_early_origin(uint32_t* origin);
+extern "C" bool dk64nx_interp_take_in_between();
 
 // Time of the last display list's passes in microseconds (second: 0 when it had no in-between image), for the
 // NX Options performance overlay.
@@ -180,11 +183,33 @@ namespace {
                 dk64nx_pass2_us = static_cast<uint32_t>(armTicksToNs(armGetSystemTick() - second) / 1000);
             }
             DK64NX_TIME(0, start);
+            presented_early = nx::interpolated_60() && present_early();
         }
 
         void send_dummy_workload(uint32_t) override {}
 
+        // 60 fps, early presentation: the in-between image and the real one go to the display right away, one after
+        // the other; with swap interval 1 the display shows one per refresh, in order. Rendering a frame may then
+        // take a whole game frame (33 ms) instead of one refresh: at the stock 1020 MHz CPU the two passes take
+        // 16-19 ms. GLideN64 presents the VI origin's buffer, so the origin is pointed at this frame's for the swap.
+        bool present_early() {
+            uint32_t origin = 0;
+            if (!dk64nx_interp_early_enabled() || !dk64nx_interp_early_origin(&origin)) return false;
+            auto* vi = ultramodern::renderer::get_vi_regs();
+            const uint32_t shown = vi->VI_ORIGIN_REG;
+            vi->VI_ORIGIN_REG = origin;
+            if (dk64nx_interp_take_in_between()) {
+                UpdateScreen();
+                dk64nx_interp_present_done();
+            }
+            UpdateScreen();
+            vi->VI_ORIGIN_REG = shown;
+            return true;
+        }
+
         void update_screen() override {
+            // Early presentation already showed this frame; the display holds it until the next one.
+            if (presented_early) return;
             // DK64 starts frame N+2 in the buffer still on screen and relies on the RDP freeze (not
             // emulated) to hold it back, so re-presenting that buffer would show N+2 before N+1:
             // back-and-forth jitter in motion. Keep the image on screen instead; the VI moves to the
@@ -226,6 +251,7 @@ namespace {
         // ponytail: 3 held VIs max, so single-buffered scenes drop to 15 Hz at worst; a real RDP freeze would avoid it.
         static constexpr uint32_t MAX_HELD_PRESENTS = 3;
         uint32_t presented_origin = 0;
+        bool presented_early = false;
         uint32_t held_presents = 0;
     };
 }
