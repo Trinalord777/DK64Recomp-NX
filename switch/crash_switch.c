@@ -9,13 +9,20 @@
 #define MAX_FRAMES 32
 #define STACK_SCAN_LIMIT (8u * 1024 * 1024)
 
-extern char __start__[];
 
 alignas(16) u8 __nx_exception_stack[0x4000];
 u64 __nx_exception_stack_size = sizeof(__nx_exception_stack);
 
+// The start of the mapping that holds this code: __start__ is an absolute symbol (0), not the load address.
+static u64 module_base(void) {
+    MemoryInfo info;
+    u32 page_info;
+    if (R_FAILED(svcQueryMemory(&info, &page_info, (u64)(uintptr_t)&module_base))) return 0;
+    return info.addr;
+}
+
 static u64 module_offset(u64 address) {
-    return address - (u64)(uintptr_t)__start__;
+    return address - module_base();
 }
 
 // Frame records (fp -> {previous fp, lr}) only exist where code keeps frame pointers.
