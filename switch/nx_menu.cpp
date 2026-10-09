@@ -268,7 +268,10 @@ namespace {
             if (!wrap || (is_restart(selected) && !can_restart())) return;
             if (quit_armed) {
                 save_changes();
-                if (is_restart(selected)) envSetNextLoad(dk64nx_program_path, dk64nx_program_path);
+                if (is_restart(selected)) {
+                    const Result rc = envSetNextLoad(dk64nx_program_path, dk64nx_program_path);
+                    std::printf("[DK64NX] restart: next load %s (rc 0x%x)\n", dk64nx_program_path, rc);
+                }
                 SDL_Event quit{};
                 quit.type = SDL_QUIT;
                 SDL_PushEvent(&quit);

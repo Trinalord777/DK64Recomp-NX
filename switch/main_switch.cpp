@@ -13,6 +13,8 @@
 #include <exception>
 #include <vector>
 
+#include <unistd.h>
+
 #include <SDL.h>
 #include <switch.h>
 
@@ -68,6 +70,14 @@ namespace {
 
     void step(const char* what) {
         printf("[DK64NX] step: %s\n", what);
+    }
+
+    // Threads left behind keep running after the loader unmaps this .nro's code.
+    void log_live_threads() {
+        u64 ids[64];
+        s32 count = 0;
+        const Result rc = svcGetThreadList(&count, ids, 64, INVALID_HANDLE);
+        printf("[DK64NX] threads still alive: %d (rc 0x%x)\n", count, rc);
     }
 
     [[noreturn]] void log_terminate() {
@@ -450,8 +460,14 @@ int main(int argc, char** argv) {
     dk64nx_remote_stop();
 #endif
     dk64nx_perf_stop();
-
+    step("SDL_Quit");
     SDL_Quit();
     socketExit();
-    return EXIT_SUCCESS;
+    log_live_threads();
+    step("back to the loader");
+    // Everything that has to stop is stopped above; the loader reclaims the rest. _exit skips the global C++
+    // destructors, which may wait on threads that are gone, and still runs libnx's cleanup before returning to the
+    // loader (which then starts the .nro again after Restart Game).
+    fflush(nullptr);
+    _exit(EXIT_SUCCESS);
 }
