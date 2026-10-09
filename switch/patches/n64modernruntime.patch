@@ -187,20 +187,22 @@ index 8ca779e..f415d72 100644
  #else
      std::quick_exit(exit_status);
 diff --git a/ultramodern/src/events.cpp b/ultramodern/src/events.cpp
-index 17d7a47..43908f3 100644
+index 17d7a47..93bed48 100644
 --- a/ultramodern/src/events.cpp
 +++ b/ultramodern/src/events.cpp
-@@ -184,6 +184,9 @@ extern moodycamel::LightweightSemaphore graphics_shutdown_ready;
+@@ -184,6 +184,11 @@ extern moodycamel::LightweightSemaphore graphics_shutdown_ready;
  
  void set_dummy_vi(bool odd);
  
 +// ScreenUpdateActions enqueued but not yet taken by the gfx thread (Switch present skipping).
 +static std::atomic_int pending_screen_updates{0};
++// Updates skipped that way since the start: VIs that showed nothing new (NX Options performance overlay).
++std::atomic<int> dk64nx_dropped_screen_updates{0};
 +
  void vi_thread_func() {
      ultramodern::set_native_thread_name("VI Thread");
      // This thread should be prioritized over every other thread in the application, as it's what allows
-@@ -229,6 +232,7 @@ void vi_thread_func() {
+@@ -229,6 +234,7 @@ void vi_thread_func() {
  
          // Queue a screen update for the graphics thread with the current VI register state.
          // Doing this before the VI update is equivalent to updating the screen after the previous frame's scanout finished.
@@ -208,7 +210,7 @@ index 17d7a47..43908f3 100644
          events_context.action_queue.enqueue(ScreenUpdateAction{ events_context.vi.regs });
  
          // Update VI registers and swap VI modes.
-@@ -386,6 +390,16 @@ void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_re
+@@ -386,6 +392,17 @@ void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_re
              }
              else if (const auto* screen_update_action = std::get_if<ScreenUpdateAction>(&action)) {
                  events_context.vi.update_screen_regs = screen_update_action->regs;
@@ -219,6 +221,7 @@ index 17d7a47..43908f3 100644
 +                // tasks starve. Skip an
 +                // update when a newer one is already queued behind it.
 +                if (pending_screen_updates.fetch_sub(1) > 1) {
++                    dk64nx_dropped_screen_updates.fetch_add(1);
 +                    continue;
 +                }
 +#endif

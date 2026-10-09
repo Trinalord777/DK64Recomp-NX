@@ -25,6 +25,7 @@ namespace nx {
         FrameRate,
         ClockProfile,
         FaceButtons,
+        PerformanceOverlay,
         Count
     };
 

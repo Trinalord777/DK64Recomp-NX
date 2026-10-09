@@ -2,6 +2,7 @@
 // mupen64plus GFX_INFO over the recomp's RDRAM, see
 // lib/RecompFrontend/recompui/src/renderer/rt64_render_context.cpp), so the memory layout
 // GLideN64 expects (32-bit words in host order) is already what the recompiled code writes.
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -15,6 +16,7 @@
 
 #include "librecomp/addresses.hpp"
 #include "nx_cheats.h"
+#include "nx_ram.h"
 #include "nx_settings.h"
 #include "ultramodern/renderer_context.hpp"
 
@@ -32,6 +34,11 @@ extern "C" bool dk64nx_interp_begin_second_pass();
 extern "C" void dk64nx_interp_end_second_pass();
 extern "C" bool dk64nx_interp_present_in_between(uint32_t origin);
 extern "C" void dk64nx_interp_present_done();
+
+// Time of the last display list's passes in microseconds (second: 0 when it had no in-between image), for the
+// NX Options performance overlay.
+std::atomic<uint32_t> dk64nx_pass1_us{0};
+std::atomic<uint32_t> dk64nx_pass2_us{0};
 
 namespace {
     // OSTask is copied where the RSP boot code leaves it, at the end of DMEM.
@@ -76,6 +83,7 @@ namespace {
             chosen_api = ultramodern::renderer::GraphicsApi::Auto;
             dk64nx_seed_gliden64_config();
             nx::cheats::set_rdram(rdram);
+            nx::ram::base = rdram;
 #ifdef DK64NX_REMOTE
             dk64nx_remote_set_rdram(rdram);
 #endif
@@ -156,14 +164,20 @@ namespace {
             memcpy(&dmem[TASK_DMEM_OFFSET], words, sizeof(words));
             // HALT | BROKE | TASKDONE, set before ProcessDList as GFX_INFO v2 requires.
             sp_status_reg = 0x0203;
-            [[maybe_unused]] const uint64_t start = armGetSystemTick();
+            const uint64_t start = armGetSystemTick();
             dk64nx_interp_frame_begin();
             ProcessDList();
+            const uint64_t second = armGetSystemTick();
+            DK64NX_TIME(2, start);
+            dk64nx_pass1_us = static_cast<uint32_t>(armTicksToNs(second - start) / 1000);
+            dk64nx_pass2_us = 0;
             // 60 fps: the same display list again, with matrices halfway from the previous frame (gliden64_rt64ex.cpp).
             if (nx::interpolated_60() && dk64nx_interp_begin_second_pass()) {
                 sp_status_reg = 0x0203;
                 ProcessDList();
                 dk64nx_interp_end_second_pass();
+                DK64NX_TIME(3, second);
+                dk64nx_pass2_us = static_cast<uint32_t>(armTicksToNs(armGetSystemTick() - second) / 1000);
             }
             DK64NX_TIME(0, start);
         }

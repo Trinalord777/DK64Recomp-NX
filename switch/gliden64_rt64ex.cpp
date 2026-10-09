@@ -309,6 +309,8 @@ namespace {
         u64 projection_rotation[EDGE_COUNT + 1] = {};
         u64 projection_translation[EDGE_COUNT + 1] = {};
     } match_stats;
+    // Counts before the harness's current window (dk64nx_interp_stats resets match_stats), for NX Options' Dev Tools.
+    struct { u64 frames = 0, interpolated = 0, camera_cuts = 0, unmatched = 0; } earlier_windows;
     std::mutex match_mutex;
 
     bool same_object(const LoadedMatrix& a, const LoadedMatrix& b) {
@@ -514,9 +516,22 @@ extern "C" void dk64nx_interp_present_done() {
     if (FrameBuffer* buffer = saved_frame()) buffer->interpCopy(0, false);
 }
 
+// Since the start: frames, frames with an in-between image, camera cuts, matrices left unmatched in second passes.
+extern "C" void dk64nx_interp_totals(u64 out[4]) {
+    std::lock_guard lock{match_mutex};
+    out[0] = earlier_windows.frames + match_stats.frames;
+    out[1] = earlier_windows.interpolated + match_stats.interpolated;
+    out[2] = earlier_windows.camera_cuts + match_stats.camera_cuts;
+    out[3] = earlier_windows.unmatched + match_stats.unmatched;
+}
+
 extern "C" int dk64nx_interp_stats(char* out, int size) {
     std::lock_guard lock{match_mutex};
     const MatchStats s = match_stats;
+    earlier_windows.frames += s.frames;
+    earlier_windows.interpolated += s.interpolated;
+    earlier_windows.camera_cuts += s.camera_cuts;
+    earlier_windows.unmatched += s.unmatched;
     match_stats = {};
     const double pairs = static_cast<double>(s.equal + s.close + s.far);
     char rotation[96];

@@ -219,6 +219,7 @@ void func_global_asm_805FBC5C(void);
 void osViSetSpecialFeatures(u32);
 void func_global_asm_805FBE04(void);
 void func_global_asm_805FE7FC(void);
+void func_global_asm_805FF378(Maps nextMap, s32 nextExit);
 void func_global_asm_8070A934(s32 nextMap, s32 nextExit);
 void yield_self(void);
 void func_dk64_boot_80000980(void);

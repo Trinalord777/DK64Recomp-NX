@@ -22,16 +22,38 @@
 #include "librecomp/mods.hpp"
 #include "imgui_impl_opengl3.h"
 #include "nx_cheats.h"
+#include "nx_dev_tools.h"
 #include "nx_pad.h"
 #include "nx_settings.h"
 
 extern const char* dk64nx_program_path;
+extern std::atomic<uint32_t> dk64nx_pass1_us;           // render_gliden64.cpp
+extern std::atomic<uint32_t> dk64nx_pass2_us;
+extern std::atomic<int> dk64nx_dropped_screen_updates;  // ultramodern events.cpp
 
 namespace {
     using nx::Setting;
 
-    // Rows: the settings, the mods, the cheats of cheats.cht, then Quit Game.
+    // Rows: the settings, the mods, the cheats of cheats.cht, Restart Game and Quit Game, then the dev tools. Each tab
+    // shows some of them, in its own order (tab_rows).
     constexpr int SETTING_COUNT = static_cast<int>(Setting::Count);
+    enum Tab { TAB_SETTINGS, TAB_ENHANCEMENTS, TAB_DEV_TOOLS, TAB_SYSTEM, TAB_COUNT };
+    constexpr const char* TAB_NAMES[TAB_COUNT] = {"Settings", "Enhancements", "Dev Tools", "System"};
+    // Settings of the Settings and Enhancements tabs, in display order; mods and cheats follow the Enhancements ones.
+    constexpr Setting SETTINGS_TAB[] = {
+        Setting::Resolution, Setting::AspectRatio, Setting::TextureLod, Setting::ShowFps,
+        Setting::FrameRate, Setting::ClockProfile,
+        Setting::MusicVolume, Setting::SoundVolume,
+        Setting::FaceButtons,
+        Setting::CameraType, Setting::CameraSensitivity, Setting::InvertCamera, Setting::InvertFirstPerson,
+        Setting::InvertSwimming,
+    };
+    constexpr Setting ENHANCEMENTS_TAB[] = {
+        Setting::StorySkip, Setting::LightningFlashes, Setting::CutsceneBorders, Setting::DrawDistance,
+        Setting::PerformanceOverlay,
+    };
+
+    using nx::dev::Tool;
     constexpr const char* MOD_GAME_ID = "dk64";
 
     // Read when the menu opens; mods load when the game starts, so a change needs a restart.
@@ -72,7 +94,10 @@ namespace {
     bool changed = false;
     bool quit_armed = false;
     bool scroll_to_selection = false;
-    int selected = 0;
+    int selected = static_cast<int>(SETTINGS_TAB[0]);  // a row id
+    int tab = TAB_SETTINGS;
+    std::vector<int> tab_rows[TAB_COUNT];
+    int tab_selected[TAB_COUNT] = {-1, -1, -1, -1};  // last row of each tab, -1 before the first visit
     uint32_t previous_buttons = 0;
     uint32_t stick_direction = 0;
     uint64_t repeat_at = 0;
@@ -88,15 +113,17 @@ namespace {
     // The left stick acts as the D-pad along its dominant axis only (a diagonal would move and change a value at
     // once), pressed past STICK_PRESS and released below STICK_RELEASE.
     int mod_count() { return static_cast<int>(mod_rows.size()); }
-    // System rows: Restart Game, Quit Game.
-    int row_count() { return SETTING_COUNT + mod_count() + nx::cheats::count() + 2; }
-    bool is_restart(int row) { return row == row_count() - 2; }
-    bool is_quit(int row) { return row == row_count() - 1; }
+    int system_row() { return SETTING_COUNT + mod_count() + nx::cheats::count(); }  // Restart Game, then Quit Game
+    int row_count() { return system_row() + 2 + nx::dev::count(); }
+    bool is_restart(int row) { return row == system_row(); }
+    bool is_quit(int row) { return row == system_row() + 1; }
     bool is_system(int row) { return is_restart(row) || is_quit(row); }
+    bool is_dev_tool(int row) { return row >= system_row() + 2; }
+    const Tool& dev_tool(int row) { return nx::dev::tool(row - system_row() - 2); }
     // The homebrew loader starts the .nro again on exit when told so (envSetNextLoad); not every loader can.
     bool can_restart() { return dk64nx_program_path != nullptr && envHasNextLoad(); }
     bool is_mod(int row) { return row >= SETTING_COUNT && row < SETTING_COUNT + mod_count(); }
-    bool is_cheat(int row) { return row >= SETTING_COUNT + mod_count() && !is_system(row); }
+    bool is_cheat(int row) { return row >= SETTING_COUNT + mod_count() && row < system_row(); }
     int mod_index(int row) { return row - SETTING_COUNT; }
     int cheat_index(int row) { return row - SETTING_COUNT - mod_count(); }
 
@@ -120,6 +147,24 @@ namespace {
                 }
             }
         }
+    }
+
+    void build_tabs() {
+        for (std::vector<int>& rows : tab_rows) rows.clear();
+        for (Setting setting : SETTINGS_TAB) tab_rows[TAB_SETTINGS].push_back(static_cast<int>(setting));
+        for (Setting setting : ENHANCEMENTS_TAB) tab_rows[TAB_ENHANCEMENTS].push_back(static_cast<int>(setting));
+        for (int mod = 0; mod < mod_count(); mod++) tab_rows[TAB_ENHANCEMENTS].push_back(SETTING_COUNT + mod);
+        for (int cheat = 0; cheat < nx::cheats::count(); cheat++) {
+            tab_rows[TAB_ENHANCEMENTS].push_back(SETTING_COUNT + mod_count() + cheat);
+        }
+        for (int tool = 0; tool < nx::dev::count(); tool++) tab_rows[TAB_DEV_TOOLS].push_back(system_row() + 2 + tool);
+        tab_rows[TAB_SYSTEM] = {system_row(), system_row() + 1};
+        for (int i = 0; i < TAB_COUNT; i++) {
+            if (std::find(tab_rows[i].begin(), tab_rows[i].end(), tab_selected[i]) == tab_rows[i].end()) {
+                tab_selected[i] = tab_rows[i].empty() ? -1 : tab_rows[i].front();
+            }
+        }
+        selected = tab_selected[tab];
     }
 
     // Turned on by librecomp at the next start because a chosen mod depends on it.
@@ -237,6 +282,7 @@ namespace {
 
     void open_menu() {
         refresh_mods();
+        build_tabs();
         is_open = true;
         owns_pad = true;
         release_pending = false;
@@ -252,32 +298,35 @@ namespace {
         save_changes();
     }
 
-    const char* row_section(int row);
-
-    // L/R: first row of the previous or next section (Mods and Cheats are long lists).
-    void jump_section(int direction) {
-        const int count = row_count();
-        int row = selected;
-        if (direction > 0) {
-            while (row < count - 1 && std::strcmp(row_section(row), row_section(selected)) == 0) row++;
+    // L/R: the previous or next tab, on the row last selected there. A tab without rows (no cheats.cht) is skipped.
+    void switch_tab(int direction) {
+        for (int step = 0; step < TAB_COUNT; step++) {
+            tab = (tab + direction + TAB_COUNT) % TAB_COUNT;
+            if (!tab_rows[tab].empty()) break;
         }
-        else {
-            if (row > 0 && std::strcmp(row_section(row - 1), row_section(row)) != 0) row--;  // already at a start
-            while (row > 0 && std::strcmp(row_section(row - 1), row_section(row)) == 0) row--;
-        }
-        selected = row;
+        selected = tab_selected[tab];
         quit_armed = false;
         scroll_to_selection = true;
     }
 
     void move_selection(int direction) {
-        selected = (selected + direction + row_count()) % row_count();
+        const std::vector<int>& rows = tab_rows[tab];
+        if (rows.empty()) return;
+        const int count = static_cast<int>(rows.size());
+        const int index = static_cast<int>(std::find(rows.begin(), rows.end(), selected) - rows.begin());
+        selected = rows[(index + direction + count) % count];
+        tab_selected[tab] = selected;
         quit_armed = false;
         scroll_to_selection = true;
     }
 
     // A cycles through the values; left/right stop at the ends of a number range.
     void change_selected(int direction, bool wrap) {
+        if (selected < 0) return;
+        if (is_dev_tool(selected)) {
+            if (dev_tool(selected).change != nullptr) dev_tool(selected).change(direction, wrap);
+            return;
+        }
         if (is_system(selected)) {
             if (!wrap || (is_restart(selected) && !can_restart())) return;
             if (quit_armed) {
@@ -348,8 +397,8 @@ namespace {
             close_menu();
             return;
         }
-        if (pressed & NX_L) jump_section(-1);
-        if (pressed & NX_R) jump_section(1);
+        if (pressed & NX_L) switch_tab(-1);
+        if (pressed & NX_R) switch_tab(1);
         if (actions & NX_UP) move_selection(-1);
         if (actions & NX_DOWN) move_selection(1);
         if (actions & NX_LEFT) change_selected(-1, false);
@@ -409,6 +458,7 @@ namespace {
     }
 
     std::string value_text(int row) {
+        if (is_dev_tool(row)) return dev_tool(row).value();
         if (is_system(row)) {
             if (is_restart(row) && !can_restart()) return "Unavailable";
             return quit_armed && row == selected ? "Press A again" : "";
@@ -438,6 +488,7 @@ namespace {
     }
 
     const char* row_label(int row) {
+        if (is_dev_tool(row)) return dev_tool(row).label;
         if (is_restart(row)) return "Restart Game";
         if (is_quit(row)) return "Quit Game";
         if (is_cheat(row)) return nx::cheats::name(cheat_index(row));
@@ -451,6 +502,7 @@ namespace {
     }
 
     const char* row_section(int row) {
+        if (is_dev_tool(row)) return dev_tool(row).section;
         if (is_system(row)) return "System";
         if (is_cheat(row)) return "Cheats";
         if (is_mod(row)) return "Mods";
@@ -458,6 +510,7 @@ namespace {
     }
 
     const char* row_description(int row) {
+        if (is_dev_tool(row)) return dev_tool(row).description;
         if (is_restart(row)) {
             return can_restart()
                 ? "Closes the game and starts it again, to apply mods, the aspect ratio and the resolution. Progress "
@@ -500,7 +553,7 @@ namespace {
             draw->AddRectFilled(start, {start.x + 4.0f, start.y + height}, ACCENT, 2.0f);
         }
         std::string value = value_text(row);
-        if (is_selected && !is_system(row)) {
+        if (is_selected && !is_system(row) && !(is_dev_tool(row) && dev_tool(row).change == nullptr)) {
             value = "<  " + value + "  >";
         }
         const float value_width = ImGui::CalcTextSize(value.c_str()).x;
@@ -512,6 +565,22 @@ namespace {
         ImGui::RenderTextEllipsis(draw, label_min, label_max, label_max.x, label_max.x, row_label(row), nullptr, nullptr);
         ImGui::PopStyleColor();
         draw->AddText({value_x, start.y + ROW_PADDING}, is_selected ? ACCENT : TEXT_DIM, value.c_str());
+    }
+
+    // The tab names on one line, the current one in the accent color and underlined.
+    void draw_tab_bar() {
+        ImGui::Dummy({0.0f, 4.0f});
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        for (int i = 0; i < TAB_COUNT; i++) {
+            if (i > 0) ImGui::SameLine(0.0f, 36.0f);
+            const ImVec2 at = ImGui::GetCursorScreenPos();
+            const ImVec2 size = ImGui::CalcTextSize(TAB_NAMES[i]);
+            ImGui::PushStyleColor(ImGuiCol_Text, i == tab ? ACCENT : TEXT_DIM);
+            ImGui::TextUnformatted(TAB_NAMES[i]);
+            ImGui::PopStyleColor();
+            if (i == tab) draw->AddRectFilled({at.x, at.y + size.y + 2.0f}, {at.x + size.x, at.y + size.y + 5.0f}, ACCENT, 1.0f);
+        }
+        ImGui::Dummy({0.0f, 4.0f});
     }
 
     void draw_menu(float screen_width, float screen_height) {
@@ -530,12 +599,13 @@ namespace {
         ImGui::PushStyleColor(ImGuiCol_Text, TEXT_DIM);
         ImGui::TextUnformatted("DK64: Recompiled");
         ImGui::PopStyleColor();
+        draw_tab_bar();
         ImGui::Separator();
 
         const float footer_height = 5 * ImGui::GetTextLineHeightWithSpacing() + 16.0f;
         ImGui::BeginChild("rows", {0.0f, -footer_height});
         const char* section = nullptr;
-        for (int row = 0; row < row_count(); row++) {
+        for (int row : tab_rows[tab]) {
             if (section == nullptr || std::strcmp(section, row_section(row)) != 0) {
                 section = row_section(row);
                 ImGui::Dummy({0.0f, 6.0f});
@@ -548,6 +618,10 @@ namespace {
         ImGui::EndChild();
 
         ImGui::Separator();
+        if (selected < 0) {
+            ImGui::End();
+            return;
+        }
         ImGui::PushTextWrapPos(0.0f);
         ImGui::TextUnformatted(row_description(selected));
         ImGui::PopTextWrapPos();
@@ -556,7 +630,7 @@ namespace {
             ImGui::TextUnformatted("* Applies the next time the game starts.");
             ImGui::PopStyleColor();
         }
-        const char* hint = "Up/Down  Select    L/R  Section    Left/Right/A  Change    B  Close";
+        const char* hint = "L/R  Tab    Up/Down  Select    Left/Right/A  Change    B  Close";
         ImGui::SetCursorPosY(ImGui::GetWindowHeight() - ImGui::GetStyle().WindowPadding.y - ImGui::GetTextLineHeight());
         ImGui::PushStyleColor(ImGuiCol_Text, TEXT_DIM);
         ImGui::TextUnformatted(hint);
@@ -564,9 +638,28 @@ namespace {
         ImGui::End();
     }
 
+    // FPS, the passes of the last frame and the screen refreshes per second that showed nothing new.
+    int dropped_per_second = 0;
+    int dropped_window_start = 0;
+
+    void count_dropped(uint64_t now) {
+        static uint64_t window_start_ms = 0;
+        if (now - window_start_ms < 1000) return;
+        const int dropped = dk64nx_dropped_screen_updates.load();
+        dropped_per_second = dropped - dropped_window_start;
+        dropped_window_start = dropped;
+        window_start_ms = now;
+    }
+
     void draw_fps() {
-        char text[16];
-        std::snprintf(text, sizeof(text), "%d FPS", fps);
+        char text[96];
+        if (nx::get(Setting::PerformanceOverlay) != 0) {
+            std::snprintf(text, sizeof(text), "%d FPS   %.1f + %.1f ms   %d skipped/s", fps, dk64nx_pass1_us.load() / 1000.0f,
+                          dk64nx_pass2_us.load() / 1000.0f, dropped_per_second);
+        }
+        else {
+            std::snprintf(text, sizeof(text), "%d FPS", fps);
+        }
         ImDrawList* draw = ImGui::GetForegroundDrawList();
         const ImVec2 size = ImGui::CalcTextSize(text);
         draw->AddRectFilled({12.0f, 12.0f}, {28.0f + size.x, 20.0f + size.y}, IM_COL32(0, 0, 0, 160), 6.0f);
@@ -587,7 +680,7 @@ namespace {
         ImGui_ImplOpenGL3_NewFrame();
         ImGui::NewFrame();
         if (is_open) draw_menu(io.DisplaySize.x, io.DisplaySize.y);
-        if (nx::get(Setting::ShowFps) != 0) draw_fps();
+        if (nx::get(Setting::ShowFps) != 0 || nx::get(Setting::PerformanceOverlay) != 0) draw_fps();
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
@@ -610,9 +703,11 @@ extern "C" void dk64nx_menu_on_swap(int width, int height) {
     }
     const uint64_t now = SDL_GetTicks64();
     count_frame(now);
+    count_dropped(now);
+    if (is_open) nx::dev::update(now);
     update_input(now);
     nx::cheats::apply();
-    if (!is_open && nx::get(Setting::ShowFps) == 0) return;
+    if (!is_open && nx::get(Setting::ShowFps) == 0 && nx::get(Setting::PerformanceOverlay) == 0) return;
     if (imgui_state == ImGuiState::NotStarted) {
         imgui_state = start_imgui() ? ImGuiState::Ready : ImGuiState::Failed;
     }

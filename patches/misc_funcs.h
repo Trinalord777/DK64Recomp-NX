@@ -12,5 +12,7 @@ DECLARE_FUNC(void, memcpy_recomp, void *, const void *, u32);
 DECLARE_FUNC(s32, recomp_nx_get_frame_vis);
 // @nx: VIs the current game frame lasts at least, to pace frame rates between 30 and 60 fps. Once per frame.
 DECLARE_FUNC(s32, recomp_nx_next_frame_lag);
+// @nx: a warp chosen in NX Options > Dev Tools (map << 8 | exit), or -1.
+DECLARE_FUNC(s32, recomp_nx_take_warp);
 
 #endif

@@ -306,6 +306,13 @@ RECOMP_PATCH void func_global_asm_805FBFF4(s32 arg0) {
 
         // @recomp: Fire per-frame event.
         dk64recomp_every_frame();
+        // @nx: NX Options > Dev Tools > Warp, done on the game thread as the debug warp menu does (warp_menu.c).
+        {
+            s32 warp = recomp_nx_take_warp();
+            if (warp >= 0) {
+                func_global_asm_805FF378(warp >> 8, warp & 0xFF);
+            }
+        }
         // @recomp Run Ui Callbacks
         recomp_run_ui_callbacks();
         if (D_global_asm_8076A0B1 & 1 && !D_global_asm_8076A0B2) {

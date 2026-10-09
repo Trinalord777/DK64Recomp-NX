@@ -371,6 +371,7 @@ int main(int argc, char** argv) {
     REGISTER_FUNC(recomp_get_ui_pillar);
     REGISTER_FUNC(recomp_nx_get_frame_vis);
     REGISTER_FUNC(recomp_nx_next_frame_lag);
+    REGISTER_FUNC(recomp_nx_take_warp);
     REGISTER_FUNC(recomp_get_gyro_deltas);
     REGISTER_FUNC(recomp_get_mouse_deltas);
     REGISTER_FUNC(recomp_get_inverted_axes);

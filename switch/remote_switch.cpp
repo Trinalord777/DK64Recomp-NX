@@ -28,6 +28,8 @@ std::string dk64nx_run_experiments();
 extern "C" int dk64nx_gliden64_set(const char* name, int value);
 extern int dk64nx_fast_swap_interval;  // core_switch.cpp
 extern "C" void dk64nx_menu_request_restart();  // nx_menu.cpp
+// Screen updates the graphics thread skipped because a newer one was already queued, since the start (events.cpp).
+extern std::atomic<int> dk64nx_dropped_screen_updates;
 extern "C" int dk64nx_interp_stats(char* out, int size);
 extern "C" bool dk64nx_interp_capture(uint32_t* width, uint32_t* height, const uint8_t** real, const uint8_t** in_between);
 
@@ -66,18 +68,19 @@ namespace {
     int shot_width = 0;
     int shot_height = 0;
 
-    // Graphics thread timings (render_gliden64.cpp): 0 = ProcessDList, 1 = UpdateScreen (present).
+    // Graphics thread timings (render_gliden64.cpp): 0 = both passes of a display list, 1 = UpdateScreen (present),
+    // 2 = first pass, 3 = second (interpolated) pass.
     struct Timing {
         std::atomic<uint64_t> count{0};
         std::atomic<uint64_t> total_us{0};
         std::atomic<uint64_t> max_us{0};
     };
-    Timing timings[2];
+    Timing timings[4];
 
     std::string timing_report() {
         std::string out = "OK";
-        const char* names[] = {"dl", "present"};
-        for (int i = 0; i < 2; i++) {
+        const char* names[] = {"dl", "present", "pass1", "pass2"};
+        for (int i = 0; i < 4; i++) {
             const uint64_t count = timings[i].count.exchange(0);
             const uint64_t total = timings[i].total_us.exchange(0);
             const uint64_t max = timings[i].max_us.exchange(0);
@@ -88,6 +91,10 @@ namespace {
                           static_cast<unsigned long long>(max));
             out += entry;
         }
+        static int dropped_seen = 0;
+        const int dropped = dk64nx_dropped_screen_updates.load();
+        out += " dropped_vi_updates=" + std::to_string(dropped - dropped_seen);
+        dropped_seen = dropped;
         return out + "\n";
     }
 

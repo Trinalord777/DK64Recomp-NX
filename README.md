@@ -82,20 +82,19 @@ Press **− and +** together during the game to open **NX Options**.
 
 # Settings
 
-**NX Options** (− and + together) holds the PC version's options. Move with the D-Pad or the left stick, change a
-value with Left/Right or **A**, close with **B** or − and + again. The game does not react to the pad while the menu
-is open.
+**NX Options** (− and + together) holds the PC version's options and more, in four tabs. **L**/**R** change tab,
+the D-Pad or the left stick moves, Left/Right or **A** change a value, **B** or − and + again close. The game does
+not react to the pad while the menu is open.
 
-| Section | Options |
+| Tab | Contents |
 |---|---|
-| Camera | Camera type, analog camera sensitivity, invert camera, first person and swimming |
-| Game | Story skip, lightning flashes, cutscene borders, draw distance |
-| Audio | Music and sound effects volume |
-| Display | Show FPS, aspect ratio (16:9 or 4:3), resolution (2x or 3x), texture LOD |
-| Performance | Frame rate (30 fps, or 60 fps interpolated, experimental), clock profile |
-| Controls | Face buttons (swap A and B in the game) |
-| Cheats | The GameShark codes of `cheats.cht`, on or off |
-| System | Restart Game (to apply mods and display changes), Quit Game, back to the homebrew menu |
+| Settings | Display (resolution 2x or 3x, aspect ratio 16:9 or 4:3, texture LOD, show FPS), Performance (frame rate, clock profile), Audio (music and sound effects volume), Controls (face buttons), Camera (type, analog sensitivity, inversions) |
+| Enhancements | Gameplay (story skip, lightning flashes, cutscene borders, draw distance), performance overlay, Mods (on or off, and each mod's options), Cheats (the GameShark codes of `cheats.cht`) |
+| Dev Tools | Game (map, Kong, position), Warp (to DK Isles or any level), Inventory (coins, ammo, oranges, crystal coconuts, film, melons, health), Flags (Kong unlocks, any permanent flag), Interpolation statistics |
+| System | Restart Game (applies mods and display changes), Quit Game |
+
+**Performance overlay** shows, top left, the frames per second, the time of each pass of a frame (two at 60 fps:
+the real image and the in-between one) and the screen refreshes per second that showed nothing new.
 
 **60 fps (interpolated)** is experimental: the game still runs at its original 30 fps, and an in-between image,
 with every object halfway between two of its frames, is drawn and shown between them, as the PC version does with

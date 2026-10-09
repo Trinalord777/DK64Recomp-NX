@@ -31,15 +31,15 @@ namespace {
          "Inverts first person aiming. Invert Y matches the original game.", 2, INVERT},
         {"Camera", "invert_swimming", "Invert Swimming",
          "Inverts the swimming controls. Invert Y matches the original game.", 2, INVERT},
-        {"Game", "story_skip", "Story Skip",
+        {"Gameplay", "story_skip", "Story Skip",
          "Intro Story Only skips the 5-minute introduction. On also skips the K. Rool level intros.",
          0, {"Off", "Intro Story Only", "On"}},
-        {"Game", "lightning_flashes", "Lightning Flashes",
+        {"Gameplay", "lightning_flashes", "Lightning Flashes",
          "Reduced flashes 10 times less often than the original game.", 1, {"Vanilla", "Reduced", "Off"}},
-        {"Game", "cutscene_borders", "Cutscene Borders",
+        {"Gameplay", "cutscene_borders", "Cutscene Borders",
          "Black bars at the top and bottom of the screen during cutscenes, as in the original game.", 1,
          {"On", "Off"}},
-        {"Game", "draw_distance", "Draw Distance",
+        {"Gameplay", "draw_distance", "Draw Distance",
          "From 0% (original) to 100% (10 times the original). Costs performance in large levels.",
          0, {}, 0, 100, 10, false, "%"},
         {"Audio", "music_volume", "Music Volume", "Background music volume.", 100, {}, 0, 100, 5, false, "%"},
@@ -67,6 +67,10 @@ namespace {
         {"Controls", "face_buttons", "Face Buttons",
          "Flipped swaps the A and B buttons in the game (not in this menu).",
          0, {"Normal", "Flipped"}},
+        {"Overlay", "performance_overlay", "Performance Overlay",
+         "Top left: frames shown per second, the time of each pass of a frame (two at 60 fps: the real image and "
+         "the in-between one) and the screen refreshes that showed nothing new. Below 16.7 ms per frame, 60 fps holds.",
+         0, OFF_ON},
     };
 
     std::atomic<int> values[COUNT];
