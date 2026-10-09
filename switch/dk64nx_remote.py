@@ -14,6 +14,8 @@ Examples
     dk64nx_remote.py shot capture.png
     dk64nx_remote.py peek 8076A0A8 1
     dk64nx_remote.py exp
+    dk64nx_remote.py log                    # end of the running game's log
+    dk64nx_remote.py pace                   # time between presents since the last call
 """
 from __future__ import annotations
 
@@ -100,7 +102,7 @@ def main() -> int:
             return 0
         sock.sendall((" ".join(args.command) + "\n").encode())
         reply = read_line(sock)
-        if args.command[0] == "exp" and reply == "OK":
+        if args.command[0] in ("exp", "log") and reply == "OK":
             while (line := read_line(sock)) != "END":
                 print(line)
             return 0

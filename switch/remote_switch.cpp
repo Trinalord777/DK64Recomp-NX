@@ -89,6 +89,45 @@ namespace {
         return out + "\n";
     }
 
+    // Time between presents, in buckets around 16.7 ms (one 60 Hz refresh) and 33.3 ms (two): the frame pacing.
+    constexpr uint64_t PACE_LIMITS_US[] = {12000, 15500, 18000, 25000, 31000, 36000};
+    constexpr const char* PACE_NAMES[] = {"<12", "12-15.5", "15.5-18", "18-25", "25-31", "31-36", ">36"};
+    std::atomic<uint64_t> pace_counts[7];
+    uint64_t last_present_tick = 0;  // graphics thread only
+
+    void count_present_interval() {
+        const uint64_t now = armGetSystemTick();
+        if (last_present_tick != 0) {
+            const uint64_t us = armTicksToNs(now - last_present_tick) / 1000;
+            size_t bucket = 0;
+            while (bucket < 6 && us >= PACE_LIMITS_US[bucket]) bucket++;
+            pace_counts[bucket]++;
+        }
+        last_present_tick = now;
+    }
+
+    std::string pace_report() {
+        std::string out = "OK";
+        for (size_t i = 0; i < 7; i++) {
+            out += " " + std::string(PACE_NAMES[i]) + "ms=" + std::to_string(pace_counts[i].exchange(0));
+        }
+        return out + "\n";
+    }
+
+    // The end of this run's log, which FTP cannot read while the game keeps it open.
+    std::string log_tail() {
+        FILE* file = std::fopen("sdmc:/switch/dk64recomp/dk64recomp.log", "r");
+        if (file == nullptr) return "ERR no log\n";
+        std::fseek(file, 0, SEEK_END);
+        const long size = std::ftell(file);
+        const long start = size > 4000 ? size - 4000 : 0;
+        std::fseek(file, start, SEEK_SET);
+        std::string text(static_cast<size_t>(size - start), '\0');
+        text.resize(std::fread(text.data(), 1, text.size(), file));
+        std::fclose(file);
+        return "OK\n" + text + "\nEND\n";
+    }
+
     struct TrackedThread { std::string name; Handle handle; uint64_t last_ticks; uint64_t last_time; };
     std::mutex threads_mutex;
     std::vector<TrackedThread> threads;
@@ -251,6 +290,8 @@ namespace {
             return previous < 0 ? "ERR unknown setting\n" : "OK previous=" + std::to_string(previous) + "\n";
         }
         if (command == "exp") return "OK\n" + experiments + "END\n";
+        if (command == "pace") return pace_report();
+        if (command == "log") return log_tail();
         return "ERR commands: press stick rstick shot peek setbits status cpu timing gl exp\n";
     }
 
@@ -364,6 +405,7 @@ bool dk64nx_remote_apply(NxPad* pad) {
 // Graphics thread, right before the swap: the back buffer holds the frame about to be shown.
 extern "C" void dk64nx_remote_on_swap(int width, int height) {
     presents++;
+    count_present_interval();
     std::lock_guard lock{shot_mutex};
     if (!shot_wanted) return;
     using GetIntegerv = void (*)(unsigned, int*);
