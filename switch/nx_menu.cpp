@@ -25,6 +25,8 @@
 #include "nx_pad.h"
 #include "nx_settings.h"
 
+extern const char* dk64nx_program_path;
+
 namespace {
     using nx::Setting;
 
@@ -86,10 +88,15 @@ namespace {
     // The left stick acts as the D-pad along its dominant axis only (a diagonal would move and change a value at
     // once), pressed past STICK_PRESS and released below STICK_RELEASE.
     int mod_count() { return static_cast<int>(mod_rows.size()); }
-    int row_count() { return SETTING_COUNT + mod_count() + nx::cheats::count() + 1; }
+    // System rows: Restart Game, Quit Game.
+    int row_count() { return SETTING_COUNT + mod_count() + nx::cheats::count() + 2; }
+    bool is_restart(int row) { return row == row_count() - 2; }
     bool is_quit(int row) { return row == row_count() - 1; }
+    bool is_system(int row) { return is_restart(row) || is_quit(row); }
+    // The homebrew loader starts the .nro again on exit when told so (envSetNextLoad); not every loader can.
+    bool can_restart() { return dk64nx_program_path != nullptr && envHasNextLoad(); }
     bool is_mod(int row) { return row >= SETTING_COUNT && row < SETTING_COUNT + mod_count(); }
-    bool is_cheat(int row) { return row >= SETTING_COUNT + mod_count() && !is_quit(row); }
+    bool is_cheat(int row) { return row >= SETTING_COUNT + mod_count() && !is_system(row); }
     int mod_index(int row) { return row - SETTING_COUNT; }
     int cheat_index(int row) { return row - SETTING_COUNT - mod_count(); }
 
@@ -257,10 +264,11 @@ namespace {
 
     // A cycles through the values; left/right stop at the ends of a number range.
     void change_selected(int direction, bool wrap) {
-        if (is_quit(selected)) {
-            if (!wrap) return;
+        if (is_system(selected)) {
+            if (!wrap || (is_restart(selected) && !can_restart())) return;
             if (quit_armed) {
                 save_changes();
+                if (is_restart(selected)) envSetNextLoad(dk64nx_program_path, dk64nx_program_path);
                 SDL_Event quit{};
                 quit.type = SDL_QUIT;
                 SDL_PushEvent(&quit);
@@ -391,8 +399,9 @@ namespace {
     }
 
     std::string value_text(int row) {
-        if (is_quit(row)) {
-            return quit_armed ? "Press A again" : "";
+        if (is_system(row)) {
+            if (is_restart(row) && !can_restart()) return "Unavailable";
+            return quit_armed && row == selected ? "Press A again" : "";
         }
         if (is_cheat(row)) {
             const int cheat = cheat_index(row);
@@ -419,6 +428,7 @@ namespace {
     }
 
     const char* row_label(int row) {
+        if (is_restart(row)) return "Restart Game";
         if (is_quit(row)) return "Quit Game";
         if (is_cheat(row)) return nx::cheats::name(cheat_index(row));
         if (is_mod(row)) {
@@ -431,13 +441,19 @@ namespace {
     }
 
     const char* row_section(int row) {
-        if (is_quit(row)) return "System";
+        if (is_system(row)) return "System";
         if (is_cheat(row)) return "Cheats";
         if (is_mod(row)) return "Mods";
         return nx::info(static_cast<Setting>(row)).section;
     }
 
     const char* row_description(int row) {
+        if (is_restart(row)) {
+            return can_restart()
+                ? "Closes the game and starts it again, to apply mods, the aspect ratio and the resolution. Progress "
+                  "since your last save is lost."
+                : "The homebrew loader that started the game cannot start it again: use Quit Game.";
+        }
         if (is_quit(row)) {
             return "Closes the game and returns to the homebrew menu. Progress since your last save is lost.";
         }
@@ -474,7 +490,7 @@ namespace {
             draw->AddRectFilled(start, {start.x + 4.0f, start.y + height}, ACCENT, 2.0f);
         }
         std::string value = value_text(row);
-        if (is_selected && !is_quit(row)) {
+        if (is_selected && !is_system(row)) {
             value = "<  " + value + "  >";
         }
         const float value_width = ImGui::CalcTextSize(value.c_str()).x;

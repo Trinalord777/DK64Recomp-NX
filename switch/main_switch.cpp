@@ -296,7 +296,11 @@ namespace {
 
 #define REGISTER_FUNC(name) recomp::overlays::register_base_export(#name, name)
 
+// The .nro's path, for Restart Game (nx_menu.cpp).
+const char* dk64nx_program_path = nullptr;
+
 int main(int argc, char** argv) {
+    if (argc > 0) dk64nx_program_path = argv[0];
     std::set_terminate(log_terminate);
     init_logging();
     printf("[DK64NX] DK64: Recompiled %s for Switch, applet type %d\n", VERSION_STRING.c_str(),
