@@ -7,6 +7,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <string>
 #include <vector>
@@ -41,6 +43,10 @@ namespace {
     std::vector<const recomp::config::ConfigSchema*> mod_schemas;
     std::string mod_label;
     std::map<std::string, bool> mod_enabled_at_start;
+    // Once the game runs, librecomp ignores enable_mod for mods that are not runtime toggleable (all of DK64's so
+    // far), so the menu keeps its own choices and writes them to mods.json for the next start.
+    std::map<std::string, bool> mod_chosen;
+    bool mods_dirty = false;
     std::string mod_description;
     constexpr uint32_t TOGGLE = NX_MINUS | NX_PLUS;
     constexpr uint32_t DIRECTIONS = NX_UP | NX_DOWN | NX_LEFT | NX_RIGHT;
@@ -48,8 +54,9 @@ namespace {
     constexpr uint64_t REPEAT_INTERVAL_MS = 100;
     constexpr float STICK_PRESS = 0.6f;
     constexpr float STICK_RELEASE = 0.4f;
-    constexpr float FONT_SIZE = 24.0f;
-    constexpr ImVec2 PANEL_SIZE{780.0f, 640.0f};
+    constexpr float FONT_SIZE = 27.0f;
+    // Share of the 1280x720 frame the panel covers (the console scales the frame to the TV).
+    constexpr ImVec2 PANEL_SHARE{0.82f, 0.92f};
     constexpr float ROW_PADDING = 6.0f;
     constexpr ImU32 ACCENT = IM_COL32(255, 145, 30, 255);
     constexpr ImU32 ACCENT_FILL = IM_COL32(255, 145, 30, 48);
@@ -92,7 +99,9 @@ namespace {
         mod_rows.clear();
         mod_schemas.clear();
         for (size_t mod = 0; mod < mods.size(); mod++) {
-            mod_enabled_at_start.try_emplace(mods[mod].mod_id, recomp::mods::is_mod_enabled(mods[mod].mod_id));
+            const std::string& id = mods[mod].mod_id;
+            mod_enabled_at_start.try_emplace(id, recomp::mods::is_mod_enabled(id) || recomp::mods::is_mod_auto_enabled(id));
+            mod_chosen.try_emplace(id, recomp::mods::is_mod_enabled(id));
             const recomp::config::ConfigSchema& schema = recomp::mods::get_mod_config_schema(mods[mod].mod_id);
             mod_schemas.push_back(&schema);
             mod_rows.push_back({mod, -1});
@@ -104,6 +113,36 @@ namespace {
                 }
             }
         }
+    }
+
+    // Turned on by librecomp at the next start because a chosen mod depends on it.
+    bool mod_needed(const std::string& id) {
+        for (const recomp::mods::ModDetails& mod : mods) {
+            if (!mod_chosen[mod.mod_id]) continue;
+            for (const recomp::mods::Dependency& dependency : mod.dependencies) {
+                if (!dependency.optional && dependency.mod_id == id) return true;
+            }
+        }
+        return false;
+    }
+
+    // Keeps mod_order and latest_game_mode, which librecomp also stores there.
+    void write_mods_json() {
+        const std::filesystem::path path = recomp::mods::get_mods_directory().parent_path() / "mods.json";
+        nlohmann::json json = nlohmann::json::object();
+        if (std::ifstream input{path}; input.good()) {
+            json = nlohmann::json::parse(input, nullptr, false);
+            if (json.is_discarded() || !json.is_object()) json = nlohmann::json::object();
+        }
+        std::vector<std::string> enabled;
+        for (const recomp::mods::ModDetails& mod : mods) {
+            if (mod_chosen[mod.mod_id]) enabled.push_back(mod.mod_id);
+        }
+        json["enabled_mods"] = enabled;
+        if (!json.contains("latest_game_mode")) json["latest_game_mode"] = "";
+        std::ofstream output{path};
+        output << json.dump(4);
+        if (!output.good()) std::fprintf(stderr, "[DK64NX] cannot write %s\n", path.string().c_str());
     }
 
     const recomp::config::ConfigOption& mod_option(const ModRow& row) { return mod_schemas[row.mod]->options[row.option]; }
@@ -156,6 +195,10 @@ namespace {
             changed = false;
         }
         nx::cheats::save();
+        if (mods_dirty) {
+            write_mods_json();
+            mods_dirty = false;
+        }
     }
 
     uint32_t menu_buttons(const NxPad& pad) {
@@ -236,9 +279,8 @@ namespace {
                 return;
             }
             const std::string& id = mods[row.mod].mod_id;
-            if (!recomp::mods::is_mod_auto_enabled(id)) {
-                recomp::mods::enable_mod(id, !recomp::mods::is_mod_enabled(id));
-            }
+            mod_chosen[id] = !mod_chosen[id];
+            mods_dirty = true;
             return;
         }
         const Setting setting = static_cast<Setting>(selected);
@@ -360,9 +402,9 @@ namespace {
             const ModRow& mod_row = mod_rows[mod_index(row)];
             if (mod_row.option >= 0) return mod_option_text(mod_row);
             const std::string& id = mods[mod_row.mod].mod_id;
-            const bool enabled = recomp::mods::is_mod_enabled(id) || recomp::mods::is_mod_auto_enabled(id);
-            std::string text = recomp::mods::is_mod_auto_enabled(id) ? "On (needed)" : enabled ? "On" : "Off";
-            if (enabled != mod_enabled_at_start[id]) text += " *";
+            const bool needed = !mod_chosen[id] && mod_needed(id);
+            std::string text = mod_chosen[id] ? "On" : needed ? "On (needed)" : "Off";
+            if ((mod_chosen[id] || needed) != mod_enabled_at_start[id]) text += " *";
             return text;
         }
         const Setting setting = static_cast<Setting>(row);
@@ -449,8 +491,9 @@ namespace {
     void draw_menu(float screen_width, float screen_height) {
         ImGui::GetBackgroundDrawList()->AddRectFilled({0.0f, 0.0f}, {screen_width, screen_height},
                                                       IM_COL32(0, 0, 0, 150));
-        ImGui::SetNextWindowPos({(screen_width - PANEL_SIZE.x) / 2, (screen_height - PANEL_SIZE.y) / 2});
-        ImGui::SetNextWindowSize(PANEL_SIZE);
+        const ImVec2 panel{screen_width * PANEL_SHARE.x, screen_height * PANEL_SHARE.y};
+        ImGui::SetNextWindowPos({(screen_width - panel.x) / 2, (screen_height - panel.y) / 2});
+        ImGui::SetNextWindowSize(panel);
         ImGui::Begin("NX Options", nullptr,
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoSavedSettings);
 
