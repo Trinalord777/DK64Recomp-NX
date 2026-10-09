@@ -253,11 +253,15 @@ namespace {
     std::vector<LoadedMatrix> matrices_current;
     std::vector<LoadedMatrix> matrices_previous;
 
-    constexpr f32 CLOSE_TRANSLATION = 50.0f;  // world units the same object may move in one frame
+    constexpr f32 CLOSE_TRANSLATION = 30.0f;  // world units the same object may move in one frame
     constexpr f32 CLOSE_ROTATION = 0.3f;      // largest change of a rotation/scale element
     // A matrix looks for its twin this many ranks around the expected one: an object appearing or disappearing shifts
     // every rank after it, and the search follows that shift.
     constexpr size_t MATCH_WINDOW = 8;
+    // A projection (camera) matrix that changes more than this between two frames is a camera cut, which DK64R's
+    // patches do not always mark (the DK Rap's shots): that frame gets no in-between image.
+    constexpr f32 CUT_ROTATION = 0.25f;
+    constexpr f32 CUT_TRANSLATION = 200.0f;
 
     bool substituting = false;  // second pass: matrices are replaced by rank
     size_t substitute_rank = 0;
@@ -306,33 +310,40 @@ namespace {
         }
     }
 
-    f32 distance(const LoadedMatrix& a, const LoadedMatrix& b) {
-        f32 total = 0.0f;
-        for (int r = 0; r < 4; r++) {
-            for (int c = 0; c < 4; c++) total += std::fabs(a.m[r][c] - b.m[r][c]);
-        }
-        return total;
-    }
-
-    // The previous frame's twin of the current frame's matrix of this rank, or -1.
+    // The previous frame's twin of the current frame's matrix of this rank, or -1: the expected rank first, then the
+    // nearest ranks outwards. Load order, not likeness, decides: the DK Rap's five similar skeletons stand side by
+    // side, and a bone often looks more like the neighbour's bone than like itself one frame earlier.
     ptrdiff_t find_twin(size_t rank) {
         const LoadedMatrix& now = matrices_current[rank];
         const ptrdiff_t expected = static_cast<ptrdiff_t>(rank) + rank_shift;
-        const ptrdiff_t first = std::max<ptrdiff_t>(0, expected - static_cast<ptrdiff_t>(MATCH_WINDOW));
-        const ptrdiff_t last = std::min<ptrdiff_t>(static_cast<ptrdiff_t>(matrices_previous.size()) - 1,
-                                                   expected + static_cast<ptrdiff_t>(MATCH_WINDOW));
-        ptrdiff_t best = -1;
-        f32 best_distance = 0.0f;
-        for (ptrdiff_t j = first; j <= last; j++) {
-            const LoadedMatrix& before = matrices_previous[j];
-            if (!same_object(before, now)) continue;
-            const f32 d = distance(before, now);
-            if (best < 0 || d < best_distance) {
-                best = j;
-                best_distance = d;
+        const ptrdiff_t count = static_cast<ptrdiff_t>(matrices_previous.size());
+        for (ptrdiff_t offset = 0; offset <= static_cast<ptrdiff_t>(MATCH_WINDOW); offset++) {
+            for (const ptrdiff_t j : {expected - offset, expected + offset}) {
+                if (j >= 0 && j < count && same_object(matrices_previous[j], now)) return j;
+                if (offset == 0) break;
             }
         }
-        return best;
+        return -1;
+    }
+
+    // Projection matrices of both frames, in load order: one that jumped is a camera cut.
+    bool camera_jumped() {
+        size_t before = 0;
+        size_t now = 0;
+        while (true) {
+            while (before < matrices_previous.size() && !(matrices_previous[before].param & G_MTX_PROJECTION)) before++;
+            while (now < matrices_current.size() && !(matrices_current[now].param & G_MTX_PROJECTION)) now++;
+            if (before >= matrices_previous.size() || now >= matrices_current.size()) return false;
+            const LoadedMatrix& a = matrices_previous[before++];
+            const LoadedMatrix& b = matrices_current[now++];
+            f32 translation = 0.0f;
+            f32 rotation = 0.0f;
+            for (int r = 0; r < 3; r++) {
+                translation = std::max(translation, std::fabs(a.m[3][r] - b.m[3][r]));
+                for (int c = 0; c < 3; c++) rotation = std::max(rotation, std::fabs(a.m[r][c] - b.m[r][c]));
+            }
+            if (rotation > CUT_ROTATION || translation > CUT_TRANSLATION) return true;
+        }
     }
 
     FrameBuffer* saved_frame() {
@@ -383,7 +394,7 @@ extern "C" void dk64nx_interp_frame_begin() {
 // After the first pass. False when this frame gets no in-between image.
 extern "C" bool dk64nx_interp_begin_second_pass() {
     FrameBuffer* buffer = frameBufferList().getCurrent();
-    if (camera_cut) {
+    if (camera_cut || camera_jumped()) {
         std::lock_guard lock{match_mutex};
         match_stats.camera_cuts++;
         return false;
