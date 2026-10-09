@@ -18,6 +18,7 @@
 
 #include "donk_config.h"
 #include "donk_game.h"
+#include "nx_cheats.h"
 #include "nx_settings.h"
 #include "librecomp/game.hpp"
 #include "librecomp/overlays.hpp"
@@ -301,6 +302,7 @@ int main(int argc, char** argv) {
     printf("[DK64NX] DK64: Recompiled %s for Switch, applet type %d\n", VERSION_STRING.c_str(),
            static_cast<int>(appletGetAppletType()));
     nx::load();
+    nx::cheats::load();
     dk64nx_perf_start();
 #ifdef DK64NX_REMOTE
     dk64nx_remote_start();

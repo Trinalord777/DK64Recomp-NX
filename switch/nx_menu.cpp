@@ -15,15 +15,15 @@
 
 #include "imgui.h"
 #include "imgui_impl_opengl3.h"
+#include "nx_cheats.h"
 #include "nx_pad.h"
 #include "nx_settings.h"
 
 namespace {
     using nx::Setting;
 
+    // Rows: the settings, then the cheats of cheats.cht, then Quit Game.
     constexpr int SETTING_COUNT = static_cast<int>(Setting::Count);
-    constexpr int QUIT_ROW = SETTING_COUNT;
-    constexpr int ROW_COUNT = SETTING_COUNT + 1;
     constexpr uint32_t TOGGLE = NX_MINUS | NX_PLUS;
     constexpr uint32_t DIRECTIONS = NX_UP | NX_DOWN | NX_LEFT | NX_RIGHT;
     constexpr uint64_t REPEAT_DELAY_MS = 400;
@@ -60,6 +60,19 @@ namespace {
 
     // The left stick acts as the D-pad along its dominant axis only (a diagonal would move and change a value at
     // once), pressed past STICK_PRESS and released below STICK_RELEASE.
+    int row_count() { return SETTING_COUNT + nx::cheats::count() + 1; }
+    bool is_quit(int row) { return row == row_count() - 1; }
+    bool is_cheat(int row) { return row >= SETTING_COUNT && !is_quit(row); }
+    int cheat_index(int row) { return row - SETTING_COUNT; }
+
+    void save_changes() {
+        if (changed) {
+            nx::save();
+            changed = false;
+        }
+        nx::cheats::save();
+    }
+
     uint32_t menu_buttons(const NxPad& pad) {
         const float x = std::fabs(pad.lx);
         const float y = std::fabs(pad.ly);
@@ -86,31 +99,30 @@ namespace {
         is_open = false;
         release_pending = true;
         quit_armed = false;
-        if (changed) {
-            nx::save();
-        }
+        save_changes();
     }
 
     void move_selection(int direction) {
-        selected = (selected + direction + ROW_COUNT) % ROW_COUNT;
+        selected = (selected + direction + row_count()) % row_count();
         quit_armed = false;
         scroll_to_selection = true;
     }
 
     // A cycles through the values; left/right stop at the ends of a number range.
     void change_selected(int direction, bool wrap) {
-        if (selected == QUIT_ROW) {
+        if (is_quit(selected)) {
             if (!wrap) return;
             if (quit_armed) {
-                if (changed) {
-                    nx::save();
-                    changed = false;
-                }
+                save_changes();
                 SDL_Event quit{};
                 quit.type = SDL_QUIT;
                 SDL_PushEvent(&quit);
             }
             quit_armed = true;
+            return;
+        }
+        if (is_cheat(selected)) {
+            nx::cheats::toggle(cheat_index(selected));
             return;
         }
         const Setting setting = static_cast<Setting>(selected);
@@ -219,8 +231,12 @@ namespace {
     }
 
     std::string value_text(int row) {
-        if (row == QUIT_ROW) {
+        if (is_quit(row)) {
             return quit_armed ? "Press A again" : "";
+        }
+        if (is_cheat(row)) {
+            const int cheat = cheat_index(row);
+            return !nx::cheats::supported(cheat) ? "Unsupported" : nx::cheats::enabled(cheat) ? "On" : "Off";
         }
         const Setting setting = static_cast<Setting>(row);
         const nx::SettingInfo& info = nx::info(setting);
@@ -234,17 +250,27 @@ namespace {
     }
 
     const char* row_label(int row) {
-        return row == QUIT_ROW ? "Quit Game" : nx::info(static_cast<Setting>(row)).label;
+        if (is_quit(row)) return "Quit Game";
+        if (is_cheat(row)) return nx::cheats::name(cheat_index(row));
+        return nx::info(static_cast<Setting>(row)).label;
     }
 
     const char* row_section(int row) {
-        return row == QUIT_ROW ? "System" : nx::info(static_cast<Setting>(row)).section;
+        if (is_quit(row)) return "System";
+        if (is_cheat(row)) return "Cheats";
+        return nx::info(static_cast<Setting>(row)).section;
     }
 
     const char* row_description(int row) {
-        return row == QUIT_ROW
-            ? "Closes the game and returns to the homebrew menu. Progress since your last save is lost."
-            : nx::info(static_cast<Setting>(row)).description;
+        if (is_quit(row)) {
+            return "Closes the game and returns to the homebrew menu. Progress since your last save is lost.";
+        }
+        if (is_cheat(row)) {
+            return nx::cheats::supported(cheat_index(row))
+                ? "GameShark code from cheats.cht, written into the game's memory every frame while On."
+                : "This code rewrites the game's MIPS instructions, which the recompiled game no longer runs.";
+        }
+        return nx::info(static_cast<Setting>(row)).description;
     }
 
     void draw_row(int row) {
@@ -264,7 +290,7 @@ namespace {
         }
         draw->AddText({start.x + 18.0f, start.y + ROW_PADDING}, TEXT, row_label(row));
         std::string value = value_text(row);
-        if (is_selected && row != QUIT_ROW) {
+        if (is_selected && !is_quit(row)) {
             value = "<  " + value + "  >";
         }
         const float value_width = ImGui::CalcTextSize(value.c_str()).x;
@@ -292,7 +318,7 @@ namespace {
         const float footer_height = 5 * ImGui::GetTextLineHeightWithSpacing() + 16.0f;
         ImGui::BeginChild("rows", {0.0f, -footer_height});
         const char* section = nullptr;
-        for (int row = 0; row < ROW_COUNT; row++) {
+        for (int row = 0; row < row_count(); row++) {
             if (section == nullptr || std::strcmp(section, row_section(row)) != 0) {
                 section = row_section(row);
                 ImGui::Dummy({0.0f, 6.0f});
@@ -308,7 +334,7 @@ namespace {
         ImGui::PushTextWrapPos(0.0f);
         ImGui::TextUnformatted(row_description(selected));
         ImGui::PopTextWrapPos();
-        if (selected != QUIT_ROW && nx::info(static_cast<Setting>(selected)).needs_restart) {
+        if (selected < SETTING_COUNT && nx::info(static_cast<Setting>(selected)).needs_restart) {
             ImGui::PushStyleColor(ImGuiCol_Text, ACCENT);
             ImGui::TextUnformatted("* Applies the next time the game starts.");
             ImGui::PopStyleColor();
@@ -361,6 +387,7 @@ extern "C" void dk64nx_menu_on_swap(int width, int height) {
     const uint64_t now = SDL_GetTicks64();
     count_frame(now);
     update_input(now);
+    nx::cheats::apply();
     if (!is_open && nx::get(Setting::ShowFps) == 0) return;
     if (imgui_state == ImGuiState::NotStarted) {
         imgui_state = start_imgui() ? ImGuiState::Ready : ImGuiState::Failed;

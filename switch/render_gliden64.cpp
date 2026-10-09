@@ -14,6 +14,7 @@
 #include "m64p_plugin.h"
 
 #include "librecomp/addresses.hpp"
+#include "nx_cheats.h"
 #include "nx_settings.h"
 #include "ultramodern/renderer_context.hpp"
 
@@ -69,6 +70,7 @@ namespace {
         explicit GLideN64RendererContext(uint8_t* rdram) {
             chosen_api = ultramodern::renderer::GraphicsApi::Auto;
             dk64nx_seed_gliden64_config();
+            nx::cheats::set_rdram(rdram);
 #ifdef DK64NX_REMOTE
             dk64nx_remote_set_rdram(rdram);
 #endif

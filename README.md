@@ -93,11 +93,19 @@ is open.
 | Audio | Music and sound effects volume |
 | Display | Show FPS, aspect ratio (16:9 or 4:3), resolution (2x or 3x) |
 | Performance | Frame rate (30 to 60 fps, experimental above 30), clock profile |
+| Controls | Face buttons (swap A and B in the game) |
+| Cheats | The GameShark codes of `cheats.cht`, on or off |
 | System | Quit Game, back to the homebrew menu |
 
 **Frame rate** goes from 30 (the original) to 60 fps in steps of 5. Above 30 it is experimental: the game mixes
 frames of one and two screen refreshes, as it already does in Jetpac (50 fps is four short frames then a long one),
 and stops waiting for the screen between frames. Some timers and mini-games may not keep their original speed.
+
+**Cheats** come from `sdmc:/switch/dk64recomp/cheats.cht`, in libretro's format: copy
+[Donkey Kong 64 (U).cht](https://github.com/libretro/libretro-database/blob/master/cht/Nintendo%20-%20Nintendo%2064/Donkey%20Kong%2064%20(U).cht)
+from libretro-database there and rename it. Codes that change the game's data (ammo, health, bananas, coins)
+work; codes that patch the game's instructions do not, since the game runs as recompiled code, and the menu marks
+them Unsupported. The cheats left on are remembered in `cheats_enabled.txt`.
 
 **Clock profile** raises the clocks in handheld mode only, while the game is in the foreground:
 *Docked GPU in Handheld* is the console's official docked GPU profile (768 MHz); *Horizon OC Docked Clocks*

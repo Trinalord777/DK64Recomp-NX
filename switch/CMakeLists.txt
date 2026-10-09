@@ -121,6 +121,7 @@ add_executable(dk64recomp
     crash_switch.c
     render_gliden64.cpp
     nx_settings.cpp
+    nx_cheats.cpp
     nx_menu.cpp
     perf_switch.cpp
 )
