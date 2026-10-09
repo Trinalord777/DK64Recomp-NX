@@ -127,6 +127,8 @@ add_executable(dk64recomp
     nx_cheats.cpp
     nx_menu.cpp
     nx_dev_tools.cpp
+    vsync_switch.cpp
+    window_switch.c
     jit_switch.c
     perf_switch.cpp
 )

@@ -3,6 +3,7 @@
 // addresses: `aarch64-none-elf-addr2line -fCe dk64recomp.elf <offset>`.
 #include <stdalign.h>
 #include <stdio.h>
+#include <unistd.h>
 
 #include <switch.h>
 
@@ -49,6 +50,8 @@ void __libnx_exception_handler(ThreadExceptionDump* ctx) {
     }
     print_backtrace(ctx);
     fflush(stdout);
+    // The log stays open: the SD card only learns its new size when it is synced, and a crash would lose the end.
+    fsync(fileno(stdout));
     // Leave time for the nxlink socket to drain before the process dies.
     svcSleepThread(2000000000ULL);
     svcExitProcess();

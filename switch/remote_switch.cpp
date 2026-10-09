@@ -22,6 +22,7 @@
 #include <SDL.h>
 #include <switch.h>
 
+#include "nx_dev_tools.h"
 #include "nx_pad.h"
 
 std::string dk64nx_run_experiments();
@@ -286,6 +287,7 @@ namespace {
         }
         if (command == "exp") return "OK\n" + experiments + "END\n";
         if (command == "pace") return pace_report();
+        if (command == "clocks") return "OK " + nx::dev::read_clocks() + "\n";
         if (command == "restart") {
             dk64nx_menu_request_restart();
             return "OK\n";

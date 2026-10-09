@@ -30,6 +30,7 @@ extern const char* dk64nx_program_path;
 extern std::atomic<uint32_t> dk64nx_pass1_us;           // render_gliden64.cpp
 extern std::atomic<uint32_t> dk64nx_pass2_us;
 extern std::atomic<int> dk64nx_dropped_screen_updates;  // ultramodern events.cpp
+extern std::atomic<bool> dk64nx_vsync_paced;              // vsync_switch.cpp
 
 namespace {
     using nx::Setting;
@@ -654,8 +655,9 @@ namespace {
     void draw_fps() {
         char text[96];
         if (nx::get(Setting::PerformanceOverlay) != 0) {
-            std::snprintf(text, sizeof(text), "%d FPS   %.1f + %.1f ms   %d skipped/s", fps, dk64nx_pass1_us.load() / 1000.0f,
-                          dk64nx_pass2_us.load() / 1000.0f, dropped_per_second);
+            std::snprintf(text, sizeof(text), "%d FPS   %.1f + %.1f ms   %d skipped/s   %s", fps,
+                          dk64nx_pass1_us.load() / 1000.0f, dk64nx_pass2_us.load() / 1000.0f, dropped_per_second,
+                          dk64nx_vsync_paced.load() ? "vsync" : "timer");
         }
         else {
             std::snprintf(text, sizeof(text), "%d FPS", fps);

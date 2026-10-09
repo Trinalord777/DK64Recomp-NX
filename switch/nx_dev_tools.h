@@ -19,4 +19,6 @@ namespace nx::dev {
     const Tool& tool(int index);
     // While the menu is open: refreshes the per-second readouts.
     void update(uint64_t now_ms);
+    // "CPU 1020, GPU 768, RAM 1600 MHz", read from the console now (a few IPC calls).
+    std::string read_clocks();
 }

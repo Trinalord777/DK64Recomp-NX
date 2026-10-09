@@ -4,6 +4,8 @@
 #include <atomic>
 #include <cstdio>
 
+#include <switch.h>
+
 #include "dk64_maps.h"
 #include "librecomp/helpers.hpp"
 #include "nx_ram.h"
@@ -86,6 +88,9 @@ namespace {
         nx::ram::set_u8(address, nx::ram::u8(address) ^ (1u << (index % 8)));
     }
 
+    // CPU, GPU and RAM clocks as the console runs them (clkrst), read once a second while the menu is open.
+    std::string clocks_text = "-";
+
     // Interpolation over the last second.
     uint64_t interp_window[4] = {};
     uint64_t interp_window_ms = 0;
@@ -113,6 +118,10 @@ namespace {
                            nx::ram::f32(actor + ACTOR_POSITION + 4), nx::ram::f32(actor + ACTOR_POSITION + 8));
              return std::string(buffer);
          }, nullptr},
+
+        {"Game", "Clocks",
+         "CPU, GPU and RAM clocks the console runs at right now, overclock included (refreshed every second).",
+         [] { return clocks_text; }, nullptr},
 
         {"Warp", "Warp To",
          "Left/Right: a level. A: go there now, as DK64 Recompiled's debug warp menu does. The game ignores it "
@@ -202,8 +211,28 @@ namespace {
 int nx::dev::count() { return static_cast<int>(sizeof(TOOLS) / sizeof(TOOLS[0])); }
 const nx::dev::Tool& nx::dev::tool(int index) { return TOOLS[index]; }
 
+std::string nx::dev::read_clocks() {
+    if (R_FAILED(clkrstInitialize())) return "clkrst unavailable";
+    const PcvModuleId modules[] = {PcvModuleId_CpuBus, PcvModuleId_GPU, PcvModuleId_EMC};
+    u32 mhz[3] = {};
+    for (int i = 0; i < 3; i++) {
+        ClkrstSession session;
+        u32 hz = 0;
+        if (R_SUCCEEDED(clkrstOpenSession(&session, modules[i], 3))) {
+            clkrstGetClockRate(&session, &hz);
+            clkrstCloseSession(&session);
+        }
+        mhz[i] = hz / 1000000;
+    }
+    clkrstExit();
+    char buffer[64];
+    std::snprintf(buffer, sizeof(buffer), "CPU %u, GPU %u, RAM %u MHz", mhz[0], mhz[1], mhz[2]);
+    return buffer;
+}
+
 void nx::dev::update(uint64_t now_ms) {
     if (now_ms - interp_window_ms < 1000) return;
+    clocks_text = read_clocks();
     uint64_t totals[4];
     dk64nx_interp_totals(totals);
     const double frames = static_cast<double>(totals[0] - interp_window[0]);

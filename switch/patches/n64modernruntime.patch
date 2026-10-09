@@ -187,10 +187,10 @@ index 8ca779e..f415d72 100644
  #else
      std::quick_exit(exit_status);
 diff --git a/ultramodern/src/events.cpp b/ultramodern/src/events.cpp
-index 17d7a47..93bed48 100644
+index 17d7a47..34e9d6a 100644
 --- a/ultramodern/src/events.cpp
 +++ b/ultramodern/src/events.cpp
-@@ -184,6 +184,11 @@ extern moodycamel::LightweightSemaphore graphics_shutdown_ready;
+@@ -184,6 +184,16 @@ extern moodycamel::LightweightSemaphore graphics_shutdown_ready;
  
  void set_dummy_vi(bool odd);
  
@@ -199,10 +199,29 @@ index 17d7a47..93bed48 100644
 +// Updates skipped that way since the start: VIs that showed nothing new (NX Options performance overlay).
 +std::atomic<int> dk64nx_dropped_screen_updates{0};
 +
++#ifdef __SWITCH__
++// Waits for the display's vblank at 60 fps (interpolated); false when the timer paces the VI (switch/vsync_switch.cpp).
++extern "C" bool dk64nx_wait_vsync();
++#endif
++
  void vi_thread_func() {
      ultramodern::set_native_thread_name("VI Thread");
      // This thread should be prioritized over every other thread in the application, as it's what allows
-@@ -229,6 +234,7 @@ void vi_thread_func() {
+@@ -209,7 +219,13 @@ void vi_thread_func() {
+             // printf("Skipping the next VI wait\n");
+             next = std::chrono::high_resolution_clock::now();
+         }
++#ifdef __SWITCH__
++        if (!dk64nx_wait_vsync()) {
++            ultramodern::sleep_until(next);
++        }
++#else
+         ultramodern::sleep_until(next);
++#endif
+         auto time_now = ultramodern::time_since_start();
+         // Calculate how many VIs have passed
+         uint64_t new_total_vis = (time_now * (60 * ultramodern::get_speed_multiplier()) / 1000ms) + 1;
+@@ -229,6 +245,7 @@ void vi_thread_func() {
  
          // Queue a screen update for the graphics thread with the current VI register state.
          // Doing this before the VI update is equivalent to updating the screen after the previous frame's scanout finished.
@@ -210,7 +229,7 @@ index 17d7a47..93bed48 100644
          events_context.action_queue.enqueue(ScreenUpdateAction{ events_context.vi.regs });
  
          // Update VI registers and swap VI modes.
-@@ -386,6 +392,17 @@ void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_re
+@@ -386,6 +403,17 @@ void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_re
              }
              else if (const auto* screen_update_action = std::get_if<ScreenUpdateAction>(&action)) {
                  events_context.vi.update_screen_regs = screen_update_action->regs;
