@@ -29,8 +29,10 @@ extern "C" uint32_t dk64nx_interp_shown_position(uint32_t origin, bool in_betwee
 extern "C" uint32_t dk64nx_interp_current_buffer();
 extern uint32_t dk64nx_shown_position;
 extern uint32_t dk64nx_shown_origin;
+// Bit 31 of the origin: the VI is blanked (osViBlack: hStart 0), so GLideN64 presents black.
 #define DK64NX_SHOWN(origin, in_between_image) \
-    (dk64nx_shown_position = dk64nx_interp_shown_position(origin, in_between_image), dk64nx_shown_origin = origin)
+    (dk64nx_shown_position = dk64nx_interp_shown_position(origin, in_between_image), \
+     dk64nx_shown_origin = (origin) | (ultramodern::renderer::get_vi_regs()->VI_H_START_REG == 0 ? 0x80000000u : 0))
 #define DK64NX_DL_BUFFER(index, in_between_image) \
     dk64nx_dl_buffer_ring[(index) % 512] = dk64nx_interp_current_buffer() | ((in_between_image) ? 0x80000000u : 0)
 #else
@@ -40,7 +42,7 @@ extern uint32_t dk64nx_shown_origin;
 #endif
 bool dk64nx_front_buffer_redrawn(uint32_t origin);
 extern "C" void dk64nx_interp_frame_begin();
-extern "C" bool dk64nx_interp_begin_second_pass();
+extern "C" bool dk64nx_interp_begin_second_pass(uint32_t first_pass_us);
 extern "C" void dk64nx_interp_end_second_pass();
 extern "C" bool dk64nx_interp_present_in_between(uint32_t origin);
 extern "C" void dk64nx_interp_present_done();
@@ -191,7 +193,7 @@ namespace {
             dk64nx_pass1_us = static_cast<uint32_t>(armTicksToNs(second - start) / 1000);
             dk64nx_pass2_us = 0;
             // 60 fps: the same display list again, with matrices halfway from the previous frame (gliden64_rt64ex.cpp).
-            const bool second_pass = nx::interpolated_60() && dk64nx_interp_begin_second_pass();
+            const bool second_pass = nx::interpolated_60() && dk64nx_interp_begin_second_pass(dk64nx_pass1_us);
             DK64NX_DL_BUFFER(dl_index, second_pass);
             dk64nx_dl_us_ring[dl_index % 512] = dk64nx_pass1_us;
             if (second_pass) {

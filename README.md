@@ -100,7 +100,9 @@ the real image and the in-between one) and the screen refreshes per second that 
 with every object halfway between two of its frames, is drawn and shown between them, as the PC version does with
 RT64. It adds one frame of latency. Camera cuts are not interpolated. Each image waits for the screen's refresh:
 measured walking in DK Isles at the stock 1020 MHz, 297 of 299 consecutive images move forward by exactly half a
-frame (in-between, then real), none goes back, and 1 refresh in 5 s repeats an image.
+frame (in-between, then real), none goes back, and 1 refresh in 5 s repeats an image. A frame too heavy for two
+passes in time (first pass over 15 ms) shows without its in-between image, so the game never waits: in Creepy
+Castle at 1020 MHz, 2 frames out of 199 run late instead of 34-49, with 68% of the frames interpolated.
 
 **Texture LOD** is off by default: GLideN64's level of detail emulation tints the Kongs' eye whites pink and blurs
 their pupils, as reported in

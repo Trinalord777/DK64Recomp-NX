@@ -231,6 +231,12 @@ void RT64EX_AdjustRectX(f32* xs, u32 count, f32 scale, f32 width) {
 static f32 cut_rotation = 0.25f;
 static f32 cut_translation = 5000.0f;
 
+// A frame whose first pass took longer than this gets no in-between image: both passes and the presents must fit in
+// the game's 33.3 ms frame, or the game itself loses a frame (a 50-60 ms freeze); the second pass costs about as much
+// as the first. Measured in Creepy Castle at 1020 MHz, 3x, over 199 frames: no limit lost 34-49 frames, 17 ms lost 26
+// (75% with an in-between), 15 ms lost 2 (68%), 11-13 ms lost 2 (50%). Dev harness: gl pass2max <microseconds>.
+static u32 pass2_max_us = 15000;
+
 // Graphics thread: GLideN64 saves its shaders storage (the combiners seen so far, compiled again at the next start) only
 // at shutdown, which the game closed from the HOME menu never reaches: every session then compiled each new effect in
 // the middle of play, a freeze of up to 122 ms measured. The swap hook calls this every few seconds.
@@ -247,6 +253,11 @@ extern "C" int dk64nx_gliden64_set(const char* name, int value) {
     if (strcmp(name, "cuttrans") == 0) {
         const int previous = static_cast<int>(cut_translation);
         cut_translation = static_cast<f32>(value);
+        return previous;
+    }
+    if (strcmp(name, "pass2max") == 0) {
+        const int previous = static_cast<int>(pass2_max_us);
+        pass2_max_us = static_cast<u32>(value);
         return previous;
     }
     struct Field { const char* name; u32* value; };
@@ -325,6 +336,7 @@ namespace {
         u64 count_changed = 0;
         u64 interpolated = 0;
         u64 camera_cuts = 0;
+        u64 over_budget = 0;    // frames whose first pass was too long for a second one
         u64 unmatched = 0;      // second-pass matrices left as they are
         u64 projection_rotation[EDGE_COUNT + 1] = {};
         u64 projection_translation[EDGE_COUNT + 1] = {};
@@ -444,8 +456,8 @@ extern "C" void dk64nx_interp_frame_begin() {
     frames_begun++;
 }
 
-// After the first pass. False when this frame gets no in-between image.
-extern "C" bool dk64nx_interp_begin_second_pass() {
+// After the first pass, which took first_pass_us. False when this frame gets no in-between image.
+extern "C" bool dk64nx_interp_begin_second_pass(u32 first_pass_us) {
     FrameBuffer* buffer = frameBufferList().getCurrent();
     if (buffer != nullptr) {
         in_between.erase(buffer->m_startAddress);  // that image belonged to an older frame
@@ -455,6 +467,11 @@ extern "C" bool dk64nx_interp_begin_second_pass() {
     if (camera_cut || jumped) {
         std::lock_guard lock{match_mutex};
         match_stats.camera_cuts++;
+        return false;
+    }
+    if (first_pass_us > pass2_max_us) {
+        std::lock_guard lock{match_mutex};
+        match_stats.over_budget++;
         return false;
     }
     if (matrices_previous.empty() || buffer == nullptr || config.video.multisampling != 0) return false;
@@ -587,9 +604,9 @@ extern "C" int dk64nx_interp_stats(char* out, int size) {
              (unsigned long long)s.projection_translation[0], (unsigned long long)s.projection_translation[1],
              (unsigned long long)s.projection_translation[2], (unsigned long long)s.projection_translation[3],
              (unsigned long long)s.projection_translation[4], (unsigned long long)s.projection_translation[5]);
-    return snprintf(out, size, "frames=%llu interpolated=%llu cuts=%llu unmatched/frame=%.1f matrices/frame=%.0f equal=%.1f%% close=%.1f%% far=%.1f%% count_changed=%llu proj_rot(<.05/.1/.25/.5/1/more)=%s proj_trans(<50/200/1k/5k/20k/more)=%s",
+    return snprintf(out, size, "frames=%llu interpolated=%llu cuts=%llu over_budget=%llu unmatched/frame=%.1f matrices/frame=%.0f equal=%.1f%% close=%.1f%% far=%.1f%% count_changed=%llu proj_rot(<.05/.1/.25/.5/1/more)=%s proj_trans(<50/200/1k/5k/20k/more)=%s",
                     (unsigned long long)s.frames, (unsigned long long)s.interpolated, (unsigned long long)s.camera_cuts,
-                    s.interpolated ? double(s.unmatched) / s.interpolated : 0.0,
+                    (unsigned long long)s.over_budget, s.interpolated ? double(s.unmatched) / s.interpolated : 0.0,
                     s.frames ? double(s.matrices) / s.frames : 0.0,
                     pairs ? 100.0 * s.equal / pairs : 0.0, pairs ? 100.0 * s.close / pairs : 0.0,
                     pairs ? 100.0 * s.far / pairs : 0.0, (unsigned long long)s.count_changed, rotation, translation);
