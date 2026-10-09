@@ -208,6 +208,20 @@ namespace {
         }
     }
 
+    // Quit Game, or Restart Game: the homebrew loader then starts the .nro again.
+    void leave_game(bool restart) {
+        save_changes();
+        if (restart) {
+            const Result rc = envSetNextLoad(dk64nx_program_path, dk64nx_program_path);
+            std::printf("[DK64NX] restart: next load %s (rc 0x%x)\n", dk64nx_program_path, rc);
+        }
+        SDL_Event quit{};
+        quit.type = SDL_QUIT;
+        SDL_PushEvent(&quit);
+    }
+
+    std::atomic<bool> restart_requested{false};  // dev harness (restart command)
+
     uint32_t menu_buttons(const NxPad& pad) {
         const float x = std::fabs(pad.lx);
         const float y = std::fabs(pad.ly);
@@ -267,14 +281,7 @@ namespace {
         if (is_system(selected)) {
             if (!wrap || (is_restart(selected) && !can_restart())) return;
             if (quit_armed) {
-                save_changes();
-                if (is_restart(selected)) {
-                    const Result rc = envSetNextLoad(dk64nx_program_path, dk64nx_program_path);
-                    std::printf("[DK64NX] restart: next load %s (rc 0x%x)\n", dk64nx_program_path, rc);
-                }
-                SDL_Event quit{};
-                quit.type = SDL_QUIT;
-                SDL_PushEvent(&quit);
+                leave_game(is_restart(selected));
             }
             quit_armed = true;
             return;
@@ -593,7 +600,14 @@ bool dk64nx_menu_owns_pad() {
 }
 
 // Graphics thread, right before the swap (declared inside core_switch.cpp's extern "C" block).
+extern "C" void dk64nx_menu_request_restart() {
+    restart_requested = true;
+}
+
 extern "C" void dk64nx_menu_on_swap(int width, int height) {
+    if (restart_requested.exchange(false) && can_restart()) {
+        leave_game(true);
+    }
     const uint64_t now = SDL_GetTicks64();
     count_frame(now);
     update_input(now);

@@ -27,6 +27,7 @@
 std::string dk64nx_run_experiments();
 extern "C" int dk64nx_gliden64_set(const char* name, int value);
 extern int dk64nx_fast_swap_interval;  // core_switch.cpp
+extern "C" void dk64nx_menu_request_restart();  // nx_menu.cpp
 extern "C" int dk64nx_interp_stats(char* out, int size);
 extern "C" bool dk64nx_interp_capture(uint32_t* width, uint32_t* height, const uint8_t** real, const uint8_t** in_between);
 
@@ -278,6 +279,10 @@ namespace {
         }
         if (command == "exp") return "OK\n" + experiments + "END\n";
         if (command == "pace") return pace_report();
+        if (command == "restart") {
+            dk64nx_menu_request_restart();
+            return "OK\n";
+        }
         if (command == "swap") {
             int value = 0;
             if (!(in >> value) || value < 0 || value > 2) return "ERR usage: swap 0|1|2\n";

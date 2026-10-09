@@ -51,6 +51,10 @@ namespace {
         {"Display", "resolution", "Resolution",
          "Internal resolution. 2x is lighter on the console, 3x fills the height of the 720p screen.",
          1, {"2x (640x480)", "3x (960x720)"}, 0, 0, 0, true},
+        {"Display", "texture_lod", "Texture LOD",
+         "GLideN64's level of detail emulation. On blurs the Kongs' eyes and faces and tints them pink (as reported "
+         "in mupen64plus-libretro-nx issue 458); Off draws them sharp.",
+         0, OFF_ON, 0, 0, 0, true},
         {"Performance", "frame_rate", "Frame Rate",
          "60 fps (experimental): the game still runs at its original speed, and an in-between image is drawn between "
          "two of its frames, as on PC. Costs one frame of latency.",

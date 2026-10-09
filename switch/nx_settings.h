@@ -21,6 +21,7 @@ namespace nx {
         ShowFps,
         AspectRatio,
         Resolution,
+        TextureLod,
         FrameRate,
         ClockProfile,
         FaceButtons,

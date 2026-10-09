@@ -345,6 +345,7 @@ void dk64nx_seed_gliden64_config() {
     // commands (gliden64_rt64ex.cpp), i.e. the PC port's "Expand" with HUD at the screen edges. 1 = 4:3.
     set_param(gliden, "AspectRatio", int_param(nx::widescreen() ? 3 : 1), false);
     set_param(gliden, "ThreadedVideo", bool_param(false), false);
+    set_param(gliden, "EnableLOD", bool_param(nx::at_startup(nx::Setting::TextureLod) == 1), false);
     set_param(gliden, "txHiresEnable", bool_param(false), false);
     set_param(gliden, "ShowFPS", bool_param(false), false);
     // Depth copy to RDRAM defaults to a software depth render on the CPU every frame; DK64 does
