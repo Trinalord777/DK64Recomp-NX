@@ -74,6 +74,13 @@ void dk64nx_place_thread(const char* name) {
     }
 }
 
+// ultramodern::stop_thread: waits for a std::thread to end before joining it. Its native handle is libnx's
+// struct __pthread_t, which starts with the libnx Thread.
+bool dk64nx_wait_thread_exit(void* native_handle, u64 timeout_ns) {
+    const Thread* thread = (const Thread*)native_handle;
+    return R_SUCCEEDED(waitSingleHandle(thread->handle, timeout_ns));
+}
+
 // ultramodern::ThreadPriority order (Low, Normal, High, VeryHigh, Critical) to HOS priorities,
 // where lower is more urgent; 0x2C is libnx's main thread, 0x3B its default for new threads.
 void dk64nx_set_thread_priority(int level) {

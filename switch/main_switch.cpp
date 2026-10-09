@@ -46,6 +46,7 @@ void dk64nx_input_handle_event(const SDL_Event& event);
 void dk64nx_perf_start();
 void dk64nx_perf_update();
 void dk64nx_perf_stop();
+extern "C" void dk64nx_jit_close();
 #ifdef DK64NX_REMOTE
 void dk64nx_remote_start();
 void dk64nx_remote_stop();
@@ -71,14 +72,6 @@ namespace {
 
     void step(const char* what) {
         printf("[DK64NX] step: %s\n", what);
-    }
-
-    // Threads left behind keep running after the loader unmaps this .nro's code.
-    void log_live_threads() {
-        u64 ids[64];
-        s32 count = 0;
-        const Result rc = svcGetThreadList(&count, ids, 64, INVALID_HANDLE);
-        printf("[DK64NX] threads still alive: %d (rc 0x%x)\n", count, rc);
     }
 
     [[noreturn]] void log_terminate() {
@@ -463,11 +456,15 @@ int main(int argc, char** argv) {
 #ifdef DK64NX_REMOTE
     dk64nx_remote_stop();
 #endif
+    // The homebrew loader reuses this process: threads left running would execute unmapped code, and their stacks
+    // (like the mods' code memory) would keep pages of the heap the next .nro gets.
+    const int threads_left = ultramodern::stop_game_threads();
+    printf("[DK64NX] game threads stopped, %d left\n", threads_left);
+    dk64nx_jit_close();
     dk64nx_perf_stop();
     step("SDL_Quit");
     SDL_Quit();
     socketExit();
-    log_live_threads();
     step("back to the loader");
     // Everything that has to stop is stopped above; the loader reclaims the rest. _exit skips the global C++
     // destructors, which may wait on threads that are gone, and still runs libnx's cleanup before returning to the
@@ -476,5 +473,9 @@ int main(int argc, char** argv) {
 #ifdef DK64NX_REMOTE
     dk64nx_trace("main: _exit");
 #endif
+    if (threads_left > 0) {
+        // Going back to the loader would crash: end the whole process instead (no restart).
+        svcExitProcess();
+    }
     _exit(EXIT_SUCCESS);
 }

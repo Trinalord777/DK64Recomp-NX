@@ -103,6 +103,22 @@ index 0f7de83..072d212 100644
  }
  
  void recomp::mods::ModContext::add_opened_mod(ModManifest&& manifest, config::Config&& config, std::vector<size_t>&& game_indices, std::vector<ModContentTypeId>&& detected_content_types, std::vector<char>&& thumbnail) {
+diff --git a/librecomp/src/recomp.cpp b/librecomp/src/recomp.cpp
+index 850689d..46a282d 100644
+--- a/librecomp/src/recomp.cpp
++++ b/librecomp/src/recomp.cpp
+@@ -995,6 +995,11 @@ void recomp::start(const recomp::Configuration& cfg) {
+     ultramodern::join_event_threads();
+     ultramodern::join_thread_cleaner_thread();
+     ultramodern::join_saving_thread();
++#if defined(__SWITCH__)
++    // Ends the mod configuration thread, as the static destructor would: the Switch build leaves through _exit
++    // (switch/main_switch.cpp).
++    mod_context.reset();
++#endif
+     
+     // Free rdram.
+     bool free_failed;
 diff --git a/thirdparty/concurrentqueue/lightweightsemaphore.h b/thirdparty/concurrentqueue/lightweightsemaphore.h
 index 41ba094..30af8fd 100644
 --- a/thirdparty/concurrentqueue/lightweightsemaphore.h
@@ -138,6 +154,25 @@ index d60c4ec..2ae644f 100644
          using WindowHandle = SDL_Window*;
  #elif defined(__APPLE__)
          struct WindowHandle {
+diff --git a/ultramodern/include/ultramodern/ultramodern.hpp b/ultramodern/include/ultramodern/ultramodern.hpp
+index 46aea61..5411e1b 100644
+--- a/ultramodern/include/ultramodern/ultramodern.hpp
++++ b/ultramodern/include/ultramodern/ultramodern.hpp
+@@ -148,6 +148,14 @@ void quit();
+ void join_event_threads();
+ void join_thread_cleaner_thread();
+ void join_saving_thread();
++// Switch: the .nro returns to the homebrew loader, which reuses this process and unmaps the code, so no thread may
++// outlive the game. Ends every game thread and the timer thread, joins them (which unmaps their stacks) and returns
++// how many did not end. Each thread ends itself where it waits (exit_thread_if_stopping): Horizon cannot end
++// another thread, and the recompiled frames above it are not unwound.
++int stop_game_threads();
++void exit_thread_if_stopping();
++bool stop_thread(std::thread& thread);
++bool stop_timer_thread();
+ 
+ void set_audio_callbacks(const audio_callbacks_t& callbacks);
+ 
 diff --git a/ultramodern/src/error_handling.cpp b/ultramodern/src/error_handling.cpp
 index 8ca779e..f415d72 100644
 --- a/ultramodern/src/error_handling.cpp
@@ -209,11 +244,42 @@ index 17d7a47..3abcdff 100644
                  renderer_context->update_screen();
                  display_refresh_rate = renderer_context->get_display_framerate();
                  resolution_scale = renderer_context->get_resolution_scale();
+diff --git a/ultramodern/src/mesgqueue.cpp b/ultramodern/src/mesgqueue.cpp
+index 9944a02..4334211 100644
+--- a/ultramodern/src/mesgqueue.cpp
++++ b/ultramodern/src/mesgqueue.cpp
+@@ -53,6 +53,7 @@ void dequeue_external_messages(RDRAM_ARG1) {
+ void ultramodern::wait_for_external_message(RDRAM_ARG1) {
+     QueuedMessage to_send;
+     external_messages.wait_dequeue(to_send);
++    ultramodern::exit_thread_if_stopping();
+     if (!do_send(PASS_RDRAM to_send.mq, to_send.mesg, to_send.jam, false) && to_send.requeue_if_blocked) {
+         external_messages.enqueue(to_send);
+     }
+@@ -61,6 +62,7 @@ void ultramodern::wait_for_external_message(RDRAM_ARG1) {
+ void ultramodern::wait_for_external_message_timed(RDRAM_ARG u32 millis) {
+     QueuedMessage to_send;
+     if (external_messages.wait_dequeue_timed(to_send, std::chrono::milliseconds{millis})) {
++        ultramodern::exit_thread_if_stopping();
+         if (!do_send(PASS_RDRAM to_send.mq, to_send.mesg, to_send.jam, false) && to_send.requeue_if_blocked) {
+             external_messages.enqueue(to_send);
+         }
 diff --git a/ultramodern/src/threads.cpp b/ultramodern/src/threads.cpp
-index 6e3ed18..75de032 100644
+index 6e3ed18..34ac4e8 100644
 --- a/ultramodern/src/threads.cpp
 +++ b/ultramodern/src/threads.cpp
-@@ -148,6 +148,18 @@ void ultramodern::set_native_thread_name(const std::string& name) {
+@@ -1,7 +1,10 @@
++#include <atomic>
+ #include <cstdio>
+ #include <thread>
+ #include <cassert>
++#include <mutex>
+ #include <string>
++#include <vector>
+ 
+ #include "ultramodern/ultra64.h"
+ #include "ultramodern/ultramodern.hpp"
+@@ -148,10 +151,83 @@ void ultramodern::set_native_thread_name(const std::string& name) {
  }
  
  void ultramodern::set_native_thread_priority(ThreadPriority pri) {}
@@ -229,6 +295,121 @@ index 6e3ed18..75de032 100644
 +void ultramodern::set_native_thread_priority(ThreadPriority pri) {
 +    dk64nx_set_thread_priority(static_cast<int>(pri));
 +}
++#endif
++
++#if defined(__SWITCH__)
++#include <pthread.h>
++
++extern "C" bool dk64nx_wait_thread_exit(void* native_handle, uint64_t timeout_ns);
++
++static std::atomic_bool stopping_threads{false};
++static std::mutex live_contexts_mutex;
++static std::vector<UltraThreadContext*> live_contexts;
++constexpr uint64_t thread_stop_timeout_ns = 500'000'000;
++
++static void track_context(UltraThreadContext* context) {
++    std::lock_guard lock{live_contexts_mutex};
++    live_contexts.push_back(context);
++}
++
++static void untrack_context(UltraThreadContext* context) {
++    std::lock_guard lock{live_contexts_mutex};
++    std::erase(live_contexts, context);
++}
++
++void ultramodern::exit_thread_if_stopping() {
++    if (stopping_threads) {
++        pthread_exit(nullptr);
++    }
++}
++
++bool ultramodern::stop_thread(std::thread& thread) {
++    if (!thread.joinable()) {
++        return true;
++    }
++    if (!dk64nx_wait_thread_exit(reinterpret_cast<void*>(thread.native_handle()), thread_stop_timeout_ns)) {
++        return false;
++    }
++    thread.join();
++    return true;
++}
++
++int ultramodern::stop_game_threads() {
++    stopping_threads = true;
++    std::lock_guard lock{live_contexts_mutex};
++    int left = 0;
++    for (UltraThreadContext* context : live_contexts) {
++        // Wakes the thread whether it waits to be resumed or for an external message.
++        context->running.signal();
++        ultramodern::enqueue_external_message(NULLPTR, NULLPTR, false, false);
++        if (!stop_thread(context->host_thread)) {
++            left++;
++        }
++    }
++    if (!stop_timer_thread()) {
++        left++;
++    }
++    return left;
++}
++#else
++static void track_context(UltraThreadContext*) {}
++static void untrack_context(UltraThreadContext*) {}
++void ultramodern::exit_thread_if_stopping() {}
  #endif
  
  void wait_for_resumed(RDRAM_ARG UltraThreadContext* thread_context) {
+     thread_context->running.wait();
++    ultramodern::exit_thread_if_stopping();
+     // If this thread's context was replaced by another thread or deleted, destroy it again from its own context.
+     // This will trigger thread cleanup instead.
+     if (TO_PTR(OSThread, ultramodern::this_thread())->context != thread_context) {
+@@ -264,6 +340,7 @@ extern "C" void osCreateThread(RDRAM_ARG PTR(OSThread) t_, OSId id, PTR(thread_f
+     UltraThreadContext* context = new UltraThreadContext{};
+     t->context = context;
+     context->host_thread = std::thread{_thread_func, PASS_RDRAM t_, entrypoint, arg, t->context};
++    track_context(context);
+ 
+     // Wait until the thread is initialized to indicate that it's ready to be started.
+     context->initialized.wait();
+@@ -353,6 +430,7 @@ void thread_cleaner_func() {
+             debug_printf("[Cleanup] Deleting thread context %p\n", to_delete);
+ 
+             to_delete->host_thread.join();
++            untrack_context(to_delete);
+             delete to_delete;
+         }
+     }
+diff --git a/ultramodern/src/timer.cpp b/ultramodern/src/timer.cpp
+index ee26c45..bcc9500 100644
+--- a/ultramodern/src/timer.cpp
++++ b/ultramodern/src/timer.cpp
+@@ -89,6 +89,7 @@ void timer_thread(RDRAM_ARG1) {
+     
+     // Lambda to process a timer action to handle adding and removing timers
+     auto process_timer_action = [&](const Action& action) {
++        ultramodern::exit_thread_if_stopping();
+         // Determine the action type and act on it
+         if (const auto* add_action = std::get_if<AddTimerAction>(&action)) {
+             active_timers.insert(add_action->timer);
+@@ -142,9 +143,21 @@ void timer_thread(RDRAM_ARG1) {
+ 
+ void ultramodern::init_timers(RDRAM_ARG1) {
+     timer_context.thread = std::thread{ timer_thread, PASS_RDRAM1 };
++#if defined(__SWITCH__)
++    // Kept joinable: libnx never frees the stack of a detached thread (stop_timer_thread joins it).
++#else
+     timer_context.thread.detach();
++#endif
+ }
+ 
++#if defined(__SWITCH__)
++bool ultramodern::stop_timer_thread() {
++    // Any action wakes the thread, which then ends in process_timer_action.
++    timer_context.action_queue.enqueue(RemoveTimerAction{NULLPTR});
++    return ultramodern::stop_thread(timer_context.thread);
++}
++#endif
++
+ uint32_t ultramodern::get_speed_multiplier() {
+     return speed_multiplier;
+ }

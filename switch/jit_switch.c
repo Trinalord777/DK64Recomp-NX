@@ -31,6 +31,17 @@ void* dk64nx_jit_alloc(size_t size) {
     return block;
 }
 
+// The homebrew loader reuses this process after the game: the region's pages must not stay locked by its code memory.
+void dk64nx_jit_close(void) {
+    mutexLock(&jit_mutex);
+    if (jit_ready) {
+        jitClose(&jit);
+        jit_ready = false;
+        jit_used = 0;
+    }
+    mutexUnlock(&jit_mutex);
+}
+
 void dk64nx_jit_free(void* ptr) {
     (void)ptr;
 }
