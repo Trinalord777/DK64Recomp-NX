@@ -39,6 +39,10 @@ extern "C" void dk64nx_interp_present_done();
 // NX Options performance overlay.
 std::atomic<uint32_t> dk64nx_pass1_us{0};
 std::atomic<uint32_t> dk64nx_pass2_us{0};
+// Ticks at which the last display lists started, one per game frame (dev harness frames command): 33.3 ms apart at
+// the game's 30 fps; 50 ms means the game itself lost a frame, which shows as a stutter even at 60 presents a second.
+uint64_t dk64nx_dl_ring[512];
+std::atomic<uint32_t> dk64nx_dl_count{0};
 
 namespace {
     // OSTask is copied where the RSP boot code leaves it, at the end of DMEM.
@@ -165,6 +169,9 @@ namespace {
             // HALT | BROKE | TASKDONE, set before ProcessDList as GFX_INFO v2 requires.
             sp_status_reg = 0x0203;
             const uint64_t start = armGetSystemTick();
+            const uint32_t dl_index = dk64nx_dl_count.load();
+            dk64nx_dl_ring[dl_index % 512] = start;
+            dk64nx_dl_count = dl_index + 1;
             dk64nx_interp_frame_begin();
             ProcessDList();
             const uint64_t second = armGetSystemTick();

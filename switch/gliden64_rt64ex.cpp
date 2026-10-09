@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "Combiner.h"
 #include "Config.h"
 #include "Graphics/Context.h"
 #include "Graphics/OpenGLContext/GLFunctions.h"
@@ -228,6 +229,13 @@ void RT64EX_AdjustRectX(f32* xs, u32 count, f32 scale, f32 width) {
 // harness tunes them (gl cutrot <hundredths>, gl cuttrans <units>).
 static f32 cut_rotation = 0.25f;
 static f32 cut_translation = 5000.0f;
+
+// Graphics thread: GLideN64 saves its shaders storage (the combiners seen so far, compiled again at the next start) only
+// at shutdown, which the game closed from the HOME menu never reaches: every session then compiled each new effect in
+// the middle of play, a freeze of up to 122 ms measured. The swap hook calls this every few seconds.
+extern "C" void dk64nx_gliden64_save_shaders() {
+    CombinerInfo::get().saveShadersStorageIfChanged();
+}
 
 extern "C" int dk64nx_gliden64_set(const char* name, int value) {
     if (strcmp(name, "cutrot") == 0) {

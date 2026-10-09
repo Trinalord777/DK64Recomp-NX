@@ -32,6 +32,8 @@ extern int dk64nx_fast_swap_interval;  // core_switch.cpp
 extern "C" void dk64nx_menu_request_restart();  // nx_menu.cpp
 extern uint64_t dk64nx_vblank_ring[];                // vsync_switch.cpp, 512 entries
 extern std::atomic<uint32_t> dk64nx_vblank_count;
+extern uint64_t dk64nx_dl_ring[];                    // render_gliden64.cpp, 512 entries
+extern std::atomic<uint32_t> dk64nx_dl_count;
 // Screen updates the graphics thread skipped because a newer one was already queued, since the start (events.cpp).
 extern std::atomic<int> dk64nx_dropped_screen_updates;
 extern "C" int dk64nx_interp_stats(char* out, int size);
@@ -141,6 +143,20 @@ namespace {
         out += " p=";
         for (uint32_t i = presents - COUNT; i < presents; i++) {
             out += std::to_string(armTicksToNs(present_ring[i % PRESENT_RING] - origin) / 1000) + ",";
+        }
+        return out + "\n";
+    }
+
+    // Milliseconds between the last 300 display lists (game frames): "OK 33.3,33.4,50.1,...".
+    std::string dls_report() {
+        const uint32_t count = dk64nx_dl_count.load();
+        if (count < 301) return "ERR not enough display lists\n";
+        std::string out = "OK ";
+        char item[16];
+        for (uint32_t i = count - 300; i < count; i++) {
+            const uint64_t ns = armTicksToNs(dk64nx_dl_ring[i % 512] - dk64nx_dl_ring[(i - 1) % 512]);
+            std::snprintf(item, sizeof(item), "%.1f,", ns / 1e6);
+            out += item;
         }
         return out + "\n";
     }
@@ -317,6 +333,7 @@ namespace {
         if (command == "exp") return "OK\n" + experiments + "END\n";
         if (command == "pace") return pace_report();
         if (command == "frames") return frames_report();
+        if (command == "dls") return dls_report();
         if (command == "clocks") return "OK " + nx::dev::read_clocks() + "\n";
         if (command == "restart") {
             dk64nx_menu_request_restart();

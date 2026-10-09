@@ -1,3 +1,38 @@
+diff --git a/src/Combiner.cpp b/src/Combiner.cpp
+index c785837..0e13c33 100644
+--- a/src/Combiner.cpp
++++ b/src/Combiner.cpp
+@@ -413,6 +413,14 @@ void CombinerInfo::setPolygonMode(DrawingState _drawingState)
+ 	}
+ }
+ 
++void CombinerInfo::saveShadersStorageIfChanged()
++{
++	if (config.generalEmulation.enableShadersStorage == 0 || m_shadersLoaded >= m_combiners.size())
++		return;
++	gfxContext.saveShadersStorage(m_combiners);
++	m_shadersLoaded = static_cast<u32>(m_combiners.size());
++}
++
+ void CombinerInfo::_saveShadersStorage() const
+ {
+ 	if (m_shadersLoaded >= m_combiners.size())
+diff --git a/src/Combiner.h b/src/Combiner.h
+index bc69b8e..8a01fee 100644
+--- a/src/Combiner.h
++++ b/src/Combiner.h
+@@ -160,6 +160,11 @@ private:
+ 	CombinerInfo(const CombinerInfo &) = delete;
+ 
+ 	void _saveShadersStorage() const;
++public:
++	// Saves the shaders storage when combiners were compiled since the last save or load. The storage is otherwise
++	// only saved at shutdown, which a console app closed from the HOME menu never reaches.
++	void saveShadersStorageIfChanged();
++private:
+ 	bool _loadShadersStorage();
+ 
+ 	bool m_bChanged;
 diff --git a/src/FrameBuffer.cpp b/src/FrameBuffer.cpp
 index 9d6ba51..1cf19b3 100644
 --- a/src/FrameBuffer.cpp

@@ -258,6 +258,7 @@ int dk64nx_fast_swap_interval = 1;
 
 void dk64nx_menu_on_swap(int width, int height);
 int dk64nx_gliden64_set(const char* name, int value);
+void dk64nx_gliden64_save_shaders();
 #ifdef DK64NX_REMOTE
 void dk64nx_remote_on_swap(int width, int height);
 #endif
@@ -277,6 +278,13 @@ m64p_error nx_VidExt_GL_SwapBuffers(void) {
     if (interval != applied_interval) {
         SDL_GL_SetSwapInterval(interval);
         applied_interval = interval;
+    }
+    // New shaders reach the SD card within SHADER_SAVE_MS, so the next start compiles them before play.
+    constexpr uint64_t SHADER_SAVE_MS = 10000;
+    static uint64_t shaders_saved_at = 0;
+    if (SDL_GetTicks64() - shaders_saved_at >= SHADER_SAVE_MS) {
+        dk64nx_gliden64_save_shaders();
+        shaders_saved_at = SDL_GetTicks64();
     }
     dk64nx_menu_on_swap(SCREEN_WIDTH, SCREEN_HEIGHT);
 #ifdef DK64NX_REMOTE
