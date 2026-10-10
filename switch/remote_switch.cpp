@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
@@ -42,6 +43,8 @@ extern std::atomic<uint32_t> dk64nx_swap_count;
 // Screen updates the graphics thread skipped because a newer one was already queued, since the start (events.cpp).
 extern std::atomic<int> dk64nx_dropped_screen_updates;
 extern "C" int dk64nx_interp_stats(char* out, int size);
+extern "C" void dk64nx_interp_request_projections();
+extern "C" int dk64nx_interp_projections(char* out, int size);
 extern "C" bool dk64nx_interp_capture(uint32_t* width, uint32_t* height, const uint8_t** real, const uint8_t** in_between);
 
 // Graphics thread: the image of the present under way, in half frames (render_gliden64.cpp).
@@ -373,6 +376,15 @@ namespace {
         if (command == "pace") return pace_report();
         if (command == "frames") return frames_report();
         if (command == "dls") return dls_report();
+        if (command == "proj") {
+            // The projection matrices of the next interpolated frame and of the one before it.
+            dk64nx_interp_request_projections();
+            char out[4096] = {};
+            for (int tries = 0; tries < 40 && dk64nx_interp_projections(out, sizeof(out)) == 0; tries++) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(25));
+            }
+            return out[0] ? "OK " + std::string(out) + "\n" : "ERR no interpolated frame within 1 s\n";
+        }
         if (command == "clocks") return "OK " + nx::dev::read_clocks() + "\n";
         if (command == "warp") {
             int map = 0, exit = 0;

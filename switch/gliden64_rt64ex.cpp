@@ -4,12 +4,14 @@
 // is implemented; interpolation and widescreen hints are skipped.
 // Encodings: lib/rt64/include/rt64_extended_gbi.h. Semantics: lib/rt64/src/gbi/rt64_gbi_extended.cpp.
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <cstring>
 #include <map>
 #include <mutex>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -37,6 +39,8 @@ static u16 g_rt64RectRightOrigin = 0x800;
 static u8 g_rt64RectAspect = 0;
 
 static void interp_note_matrix_group(u32 flags);  // frame interpolation, below
+static void interp_push_matrix_group(u32 id, u32 flags);
+static void interp_pop_matrix_group(u32 count, bool projection);
 
 namespace {
     constexpr u32 RT64_EXTENDED_OPCODE = 0x64;
@@ -52,6 +56,7 @@ namespace {
         G_EX_SETRECTALIGN_V1 = 0x06,
         G_EX_SETVIEWPORTALIGN_V1 = 0x07,
         G_EX_MATRIXGROUP_V1 = 0x0C,
+        G_EX_POPMATRIXGROUP_V1 = 0x0D,
         G_EX_PUSHVIEWPORT_V1 = 0x15,
         G_EX_POPVIEWPORT_V1 = 0x16,
         G_EX_PUSHSCISSOR_V1 = 0x17,
@@ -154,8 +159,10 @@ namespace {
                     g_rt64ProjStretch = _SHIFTR(flags, 20, 2) == G_EX_ASPECT_STRETCH;
                 }
                 interp_note_matrix_group(flags);
+                interp_push_matrix_group(w1, flags);
                 break;
             }
+            case G_EX_POPMATRIXGROUP_V1: interp_pop_matrix_group(_SHIFTR(w1, 0, 8), _SHIFTR(w1, 8, 1) != 0); break;
             case G_EX_POPSCISSOR_V1: pop_scissor(); break;
             case G_EX_SETRDRAMEXTENDED_V1: g_rt64ExtendedRDRAM = _SHIFTR(w1, 0, 1) != 0; break;
             default: break;
@@ -284,13 +291,42 @@ extern "C" int dk64nx_gliden64_set(const char* name, int value) {
 // result is the in-between frame, shown one VI before the real one (render_gliden64.cpp). DK64R's patches mark camera
 // cuts with a projection matrix group whose position does not interpolate: those frames get no in-between image.
 namespace {
+    // How the second pass finds a matrix's twin, from DK64R's RT64 matrix groups (gEXMatrixGroup), as RT64 does on PC
+    // (rt64_game_frame.cpp buildTransformIdMap): a group with an explicit ID and linear ordering pairs its k-th matrix
+    // with the previous frame's k-th matrix of the same ID; an ignored group is not interpolated; the rest (no group,
+    // automatic IDs) is matched by rank and likeness.
+    enum class Pairing : u8 { Heuristic, ById, Ignored };
+
     struct LoadedMatrix {
         u32 address;
         u8 param;
         f32 m[4][4];
+        Pairing pairing = Pairing::Heuristic;
+        u32 group = 0;
+        u32 group_index = 0;
+        u32 group_flags = 0;  // components to interpolate (G_EX_COMPONENT_* fields of the group's second word)
     };
     std::vector<LoadedMatrix> matrices_current;
     std::vector<LoadedMatrix> matrices_previous;
+
+    constexpr u32 G_EX_ID_IGNORE = 0x0;
+    constexpr u32 G_EX_ID_AUTO = 0xFFFFFFFF;
+    constexpr u32 G_EX_ORDER_LINEAR = 0x0;
+    constexpr size_t GROUP_STACK_LIMIT = 64;
+    struct MatrixGroup { bool set; u32 id; u32 flags; };
+    // Groups in effect while a display list runs, as RT64's model and view-projection matrix ID stacks; reset at the
+    // start of each pass, so both passes see the same groups.
+    std::vector<MatrixGroup> model_groups{{false, 0, 0}};
+    std::vector<MatrixGroup> projection_groups{{false, 0, 0}};
+    std::map<u32, u32> group_counts;               // first pass: matrices loaded so far per group ID
+    std::map<u64, size_t> previous_by_group;        // previous frame: (ID, index) -> rank
+
+    void reset_matrix_groups() {
+        model_groups.assign(1, {false, 0, 0});
+        projection_groups.assign(1, {false, 0, 0});
+    }
+
+    u64 group_key(u32 id, u32 index) { return (static_cast<u64>(id) << 32) | index; }
 
     constexpr f32 CLOSE_TRANSLATION = 30.0f;  // world units the same object may move in one frame
     constexpr f32 CLOSE_ROTATION = 0.3f;      // largest change of a rotation/scale element
@@ -342,6 +378,10 @@ namespace {
         u64 unmatched = 0;      // second-pass matrices left as they are
         u64 mostly_unmatched = 0;  // in-between images where most matrices were left as they are (no motion)
         u64 camera_unmatched = 0;  // in-between images whose projection (camera) matrix was left as it is
+        u64 id_paired = 0;         // second-pass matrices paired by their RT64 group ID
+        u64 id_missing = 0;        // ... whose ID and index were not in the previous frame
+        u64 ignored = 0;           // ... in a group that asks for no interpolation
+        u64 rank_disagree = 0;     // ID pairs where the rank and likeness search would have picked another matrix
         u64 projection_rotation[EDGE_COUNT + 1] = {};
         u64 projection_translation[EDGE_COUNT + 1] = {};
     } match_stats;
@@ -375,24 +415,71 @@ namespace {
         }
     }
 
-    // The previous frame's twin of the current frame's matrix of this rank, or -1: the expected rank first, then the
-    // nearest ranks outwards. Load order, not likeness, decides: the DK Rap's five similar skeletons stand side by
-    // side, and a bone often looks more like the neighbour's bone than like itself one frame earlier.
-    // The k-th projection matrix of the previous frame for the k-th of this one, as camera_jumped pairs them. The
-    // camera's view matrix holds -R * eye, which moves by more than an object's distance limit when the camera turns
-    // far from the map's origin: matched by distance, it was left unmatched in 131-159 of ~265 in-between images while
-    // running in Creepy Castle's basement (0 paired this way), and the background did not move in those images: the
-    // same picture twice in a row on screen, a 30 fps stutter in the middle of 60.
-    ptrdiff_t projection_twin(size_t rank) {
-        size_t order = 0;
-        for (size_t i = 0; i < rank; i++) order += (matrices_current[i].param & G_MTX_PROJECTION) != 0;
-        for (size_t j = 0; j < matrices_previous.size(); j++) {
-            if (!(matrices_previous[j].param & G_MTX_PROJECTION)) continue;
-            if (order-- == 0) return matrices_previous[j].param == matrices_current[rank].param ? static_cast<ptrdiff_t>(j) : -1;
+    bool perspective(const LoadedMatrix& m) { return std::fabs(m.m[2][3]) > 0.5f && std::fabs(m.m[3][3]) < 0.5f; }
+
+    // Largest change of the 3x3 part, of the translation row and of the projective column between two matrices.
+    struct MatrixDelta { f32 linear = 0.0f, translation = 0.0f, projective = 0.0f; };
+    MatrixDelta matrix_delta(const LoadedMatrix& a, const LoadedMatrix& b) {
+        MatrixDelta d;
+        for (int r = 0; r < 3; r++) {
+            d.translation = std::max(d.translation, std::fabs(a.m[3][r] - b.m[3][r]));
+            for (int c = 0; c < 3; c++) d.linear = std::max(d.linear, std::fabs(a.m[r][c] - b.m[r][c]));
         }
-        return -1;
+        for (int r = 0; r < 4; r++) d.projective = std::max(d.projective, std::fabs(a.m[r][3] - b.m[r][3]));
+        return d;
     }
 
+    // Two projection matrices that can be the same camera one frame apart: same load mode, both perspective or both
+    // affine (ortho, look-at), and no larger change than a camera cut's. A frame's projections are not in a fixed
+    // order: the HUD's orthographic matrix comes before the camera in some frames and after it in others, and the 3D
+    // HUD icons have their own perspective camera (square aspect); paired by order (6e48917), the camera was averaged
+    // with one of them on the frames where their number changed, and the in-between image exploded.
+    bool same_camera(const LoadedMatrix& a, const LoadedMatrix& b, const MatrixDelta& d) {
+        return a.param == b.param && perspective(a) == perspective(b) && d.linear < cut_rotation &&
+               d.translation < cut_translation && d.projective < 0.05f;
+    }
+
+    // The previous frame's projection most like this one among those that can be the same camera, or -1.
+    ptrdiff_t projection_twin(size_t rank) {
+        const LoadedMatrix& now = matrices_current[rank];
+        ptrdiff_t best = -1;
+        f32 best_score = 0.0f;
+        for (size_t j = 0; j < matrices_previous.size(); j++) {
+            const LoadedMatrix& before = matrices_previous[j];
+            if (!(before.param & G_MTX_PROJECTION)) continue;
+            const MatrixDelta d = matrix_delta(before, now);
+            if (!same_camera(before, now, d)) continue;
+            const f32 score = d.linear / cut_rotation + d.translation / cut_translation;
+            if (best < 0 || score < best_score) {
+                best = static_cast<ptrdiff_t>(j);
+                best_score = score;
+            }
+        }
+        return best;
+    }
+
+    // Dev harness (proj): the projection matrices of the last two frames, captured on request.
+    std::atomic<bool> proj_dump_wanted{false};
+    std::string proj_dump;
+
+    void describe_projections(std::string& out, const std::vector<LoadedMatrix>& list) {
+        char item[160];
+        for (size_t i = 0; i < list.size(); i++) {
+            const LoadedMatrix& m = list[i];
+            if (!(m.param & G_MTX_PROJECTION)) continue;
+            snprintf(item, sizeof(item), " [rank %zu %s%s %08x d=%.2f,%.2f,%.3f c3=%.2f,%.2f t=%.0f,%.0f,%.0f]", i,
+                     (m.param & G_MTX_LOAD) ? "LOAD" : "MUL", perspective(m) ? " persp" : " affine", m.address,
+                     m.m[0][0], m.m[1][1], m.m[2][2], m.m[2][3], m.m[3][3], m.m[3][0], m.m[3][1], m.m[3][2]);
+            out += item;
+        }
+    }
+
+    // The previous frame's twin of a matrix without a group ID, or -1. Projections: the camera's view matrix holds
+    // -R * eye, which moves by more than an object's distance limit when the camera turns far from the map's origin
+    // (131-159 of ~265 in-between images left it unmatched while running in Creepy Castle's basement), so they pair by
+    // camera likeness (projection_twin). Other matrices: the expected rank first, then the nearest ranks outwards.
+    // Load order, not likeness, decides: the DK Rap's five similar skeletons stand side by side, and a bone often looks
+    // more like the neighbour's bone than like itself one frame earlier.
     ptrdiff_t find_twin(size_t rank) {
         const LoadedMatrix& now = matrices_current[rank];
         if (now.param & G_MTX_PROJECTION) return projection_twin(rank);
@@ -407,27 +494,45 @@ namespace {
         return -1;
     }
 
-    // Projection matrices of both frames, in load order: one that jumped is a camera cut.
+    // The main camera of a frame: its first perspective projection loaded, and the look-at multiplied onto it.
+    struct MainCamera { ptrdiff_t projection = -1, look_at = -1; };
+    MainCamera main_camera(const std::vector<LoadedMatrix>& list) {
+        MainCamera camera;
+        for (size_t i = 0; i < list.size(); i++) {
+            const LoadedMatrix& m = list[i];
+            if (!(m.param & G_MTX_PROJECTION)) continue;
+            if (camera.projection < 0) {
+                if ((m.param & G_MTX_LOAD) && perspective(m)) camera.projection = static_cast<ptrdiff_t>(i);
+                continue;
+            }
+            if (!(m.param & G_MTX_LOAD)) camera.look_at = static_cast<ptrdiff_t>(i);
+            break;
+        }
+        return camera;
+    }
+
+    // The main camera of both frames: one that jumped, appeared or disappeared is a camera cut. Projections other than
+    // the camera's (HUD) come and go and are not compared: paired by load order, they counted 52 cuts in 349 frames
+    // in Gloomy Galleon, each one a frame shown without its in-between image.
     bool camera_jumped() {
-        size_t before = 0;
-        size_t now = 0;
+        const MainCamera before = main_camera(matrices_previous);
+        const MainCamera now = main_camera(matrices_current);
         f32 translation = 0.0f;
         f32 rotation = 0.0f;
-        while (true) {
-            while (before < matrices_previous.size() && !(matrices_previous[before].param & G_MTX_PROJECTION)) before++;
-            while (now < matrices_current.size() && !(matrices_current[now].param & G_MTX_PROJECTION)) now++;
-            if (before >= matrices_previous.size() || now >= matrices_current.size()) break;
-            const LoadedMatrix& a = matrices_previous[before++];
-            const LoadedMatrix& b = matrices_current[now++];
-            for (int r = 0; r < 3; r++) {
-                translation = std::max(translation, std::fabs(a.m[3][r] - b.m[3][r]));
-                for (int c = 0; c < 3; c++) rotation = std::max(rotation, std::fabs(a.m[r][c] - b.m[r][c]));
+        bool appeared = (before.projection < 0) != (now.projection < 0);
+        for (const auto& [a, b] : {std::pair{before.projection, now.projection}, std::pair{before.look_at, now.look_at}}) {
+            if (a < 0 || b < 0) {
+                appeared = appeared || (a < 0) != (b < 0);
+                continue;
             }
+            const MatrixDelta d = matrix_delta(matrices_previous[a], matrices_current[b]);
+            translation = std::max(translation, d.translation);
+            rotation = std::max(rotation, std::max(d.linear, d.projective));
         }
         std::lock_guard lock{match_mutex};
         match_stats.projection_rotation[bucket(ROTATION_EDGES, rotation)]++;
         match_stats.projection_translation[bucket(TRANSLATION_EDGES, translation)]++;
-        return rotation > cut_rotation || translation > cut_translation;
+        return appeared || rotation > cut_rotation || translation > cut_translation;
     }
 
     FrameBuffer* saved_frame() {
@@ -436,16 +541,60 @@ namespace {
     }
 }
 
+// First pass: the matrix group a matrix belongs to (the top of RT64's model or view-projection ID stack).
+static void tag_matrix_group(LoadedMatrix& loaded) {
+    const MatrixGroup& group = (loaded.param & G_MTX_PROJECTION) ? projection_groups.back() : model_groups.back();
+    if (!group.set || group.id == G_EX_ID_AUTO) return;
+    if (group.id == G_EX_ID_IGNORE) {  // whatever its ordering, as RT64 does
+        loaded.pairing = Pairing::Ignored;
+        return;
+    }
+    if (_SHIFTR(group.flags, 17, 2) != G_EX_ORDER_LINEAR) return;
+    loaded.pairing = Pairing::ById;
+    loaded.group = group.id;
+    loaded.group_index = group_counts[group.id]++;
+    loaded.group_flags = group.flags;
+}
+
+// Second pass, a matrix paired by ID: its twin of the previous frame, or -1. A projection must still be able to be the
+// same camera: DK64R's camera group stays in effect after the camera (NOPUSH), so the HUD's projections that follow
+// carry its ID, at an index that moves when their number changes.
+static ptrdiff_t id_twin(const LoadedMatrix& now) {
+    const auto found = previous_by_group.find(group_key(now.group, now.group_index));
+    if (found == previous_by_group.end()) return -1;
+    const LoadedMatrix& before = matrices_previous[found->second];
+    if (before.param != now.param) return -1;
+    if ((now.param & G_MTX_PROJECTION) && !same_camera(before, now, matrix_delta(before, now))) return -1;
+    return static_cast<ptrdiff_t>(found->second);
+}
+
 void RT64EX_OnMatrix(u32 address, u8 param, f32 mtx[4][4]) {
     if (!substituting) {
         LoadedMatrix loaded{address, param, {}};
         memcpy(loaded.m, mtx, sizeof(loaded.m));
+        tag_matrix_group(loaded);
         matrices_current.push_back(loaded);
         return;
     }
     const size_t rank = substitute_rank++;
     if (rank >= matrices_current.size()) return;
-    const ptrdiff_t twin = find_twin(rank);
+    const LoadedMatrix& now = matrices_current[rank];
+    if (now.pairing == Pairing::Ignored) {
+        std::lock_guard lock{match_mutex};
+        match_stats.ignored++;
+        return;
+    }
+    ptrdiff_t twin = -1;
+    if (now.pairing == Pairing::ById) {
+        twin = id_twin(now);
+        const ptrdiff_t heuristic = find_twin(rank);  // what the rank and likeness search alone would pick
+        std::lock_guard lock{match_mutex};
+        if (twin < 0) match_stats.id_missing++;
+        else match_stats.id_paired++;
+        match_stats.rank_disagree += twin >= 0 && heuristic >= 0 && heuristic != twin;
+    } else {
+        twin = find_twin(rank);
+    }
     if (twin < 0) {
         std::lock_guard lock{match_mutex};
         match_stats.unmatched++;
@@ -455,10 +604,30 @@ void RT64EX_OnMatrix(u32 address, u8 param, f32 mtx[4][4]) {
     }
     rank_shift = twin - static_cast<ptrdiff_t>(rank);
     const LoadedMatrix& before = matrices_previous[twin];
-    const LoadedMatrix& now = matrices_current[rank];
+    // Components the group leaves alone keep this frame's value (RT64: G_EX_COMPONENT_SKIP): the translation row
+    // (position), the 3x3 part (rotation, scale, skew) and the projective column (perspective).
+    const u32 flags = now.pairing == Pairing::ById ? now.group_flags : 0xFFFFFFFF;
+    const bool position = _SHIFTR(flags, 3, 2) != G_EX_COMPONENT_SKIP;
+    const bool linear = _SHIFTR(flags, 5, 2) != G_EX_COMPONENT_SKIP;
+    const bool projective = _SHIFTR(flags, 11, 2) != G_EX_COMPONENT_SKIP;
     for (int r = 0; r < 4; r++) {
-        for (int c = 0; c < 4; c++) mtx[r][c] = 0.5f * (before.m[r][c] + now.m[r][c]);
+        for (int c = 0; c < 4; c++) {
+            const bool interpolate = c == 3 ? projective : (r == 3 ? position : linear);
+            mtx[r][c] = interpolate ? 0.5f * (before.m[r][c] + now.m[r][c]) : now.m[r][c];
+        }
     }
+}
+
+static void interp_push_matrix_group(u32 id, u32 flags) {
+    std::vector<MatrixGroup>& stack = _SHIFTR(flags, 1, 1) != 0 ? projection_groups : model_groups;
+    const MatrixGroup group{true, id, flags};
+    if (_SHIFTR(flags, 0, 1) != 0 && stack.size() < GROUP_STACK_LIMIT) stack.push_back(group);
+    else stack.back() = group;
+}
+
+static void interp_pop_matrix_group(u32 count, bool projection) {
+    std::vector<MatrixGroup>& stack = projection ? projection_groups : model_groups;
+    while (count-- > 0 && stack.size() > 1) stack.pop_back();
 }
 
 // The projection matrix group of DK64R's camera (handle_interpolation in patches_interpolation.c).
@@ -476,6 +645,13 @@ extern "C" void dk64nx_interp_frame_begin() {
     matrices_current.clear();
     camera_cut = false;
     frames_begun++;
+    previous_by_group.clear();
+    for (size_t i = 0; i < matrices_previous.size(); i++) {
+        const LoadedMatrix& m = matrices_previous[i];
+        if (m.pairing == Pairing::ById) previous_by_group.emplace(group_key(m.group, m.group_index), i);
+    }
+    group_counts.clear();
+    reset_matrix_groups();
 }
 
 // After the first pass, which took first_pass_us. False when this frame gets no in-between image.
@@ -484,6 +660,14 @@ extern "C" bool dk64nx_interp_begin_second_pass(u32 first_pass_us) {
     if (buffer != nullptr) {
         in_between.erase(buffer->m_startAddress);  // that image belonged to an older frame
         frame_in_buffer[buffer->m_startAddress] = frames_begun;
+    }
+    if (proj_dump_wanted.exchange(false)) {
+        std::string text = "previous:";
+        describe_projections(text, matrices_previous);
+        text += " | current:";
+        describe_projections(text, matrices_current);
+        std::lock_guard lock{match_mutex};
+        proj_dump = text;
     }
     const bool jumped = camera_jumped();  // always measured, for the histograms
     if (camera_cut || jumped) {
@@ -501,6 +685,7 @@ extern "C" bool dk64nx_interp_begin_second_pass(u32 first_pass_us) {
     saved_buffer = buffer;
     saved_address = buffer->m_startAddress;
     substituting = true;
+    reset_matrix_groups();
     frame_unmatched = 0;
     frame_camera_unmatched = false;
     substitute_rank = 0;
@@ -630,10 +815,25 @@ extern "C" int dk64nx_interp_stats(char* out, int size) {
              (unsigned long long)s.projection_translation[0], (unsigned long long)s.projection_translation[1],
              (unsigned long long)s.projection_translation[2], (unsigned long long)s.projection_translation[3],
              (unsigned long long)s.projection_translation[4], (unsigned long long)s.projection_translation[5]);
-    return snprintf(out, size, "frames=%llu interpolated=%llu cuts=%llu over_budget=%llu mostly_unmatched=%llu camera_unmatched=%llu unmatched/frame=%.1f matrices/frame=%.0f equal=%.1f%% close=%.1f%% far=%.1f%% count_changed=%llu proj_rot(<.05/.1/.25/.5/1/more)=%s proj_trans(<50/200/1k/5k/20k/more)=%s",
+    return snprintf(out, size, "frames=%llu interpolated=%llu cuts=%llu over_budget=%llu mostly_unmatched=%llu camera_unmatched=%llu id_paired=%llu id_missing=%llu ignored=%llu rank_disagree=%llu unmatched/frame=%.1f matrices/frame=%.0f equal=%.1f%% close=%.1f%% far=%.1f%% count_changed=%llu proj_rot(<.05/.1/.25/.5/1/more)=%s proj_trans(<50/200/1k/5k/20k/more)=%s",
                     (unsigned long long)s.frames, (unsigned long long)s.interpolated, (unsigned long long)s.camera_cuts,
-                    (unsigned long long)s.over_budget, (unsigned long long)s.mostly_unmatched, (unsigned long long)s.camera_unmatched, s.interpolated ? double(s.unmatched) / s.interpolated : 0.0,
+                    (unsigned long long)s.over_budget, (unsigned long long)s.mostly_unmatched, (unsigned long long)s.camera_unmatched, (unsigned long long)s.id_paired, (unsigned long long)s.id_missing,
+                    (unsigned long long)s.ignored, (unsigned long long)s.rank_disagree, s.interpolated ? double(s.unmatched) / s.interpolated : 0.0,
                     s.frames ? double(s.matrices) / s.frames : 0.0,
                     pairs ? 100.0 * s.equal / pairs : 0.0, pairs ? 100.0 * s.close / pairs : 0.0,
                     pairs ? 100.0 * s.far / pairs : 0.0, (unsigned long long)s.count_changed, rotation, translation);
+}
+
+// Dev harness: ask for the projection matrices of the next frame, then read them (empty until a frame came).
+extern "C" void dk64nx_interp_request_projections() {
+    {
+        std::lock_guard lock{match_mutex};
+        proj_dump.clear();
+    }
+    proj_dump_wanted = true;
+}
+
+extern "C" int dk64nx_interp_projections(char* out, int size) {
+    std::lock_guard lock{match_mutex};
+    return snprintf(out, size, "%s", proj_dump.c_str());
 }
