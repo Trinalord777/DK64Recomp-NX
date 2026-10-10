@@ -22,9 +22,17 @@ extern "C" void recomp_update_inputs(uint8_t* rdram, recomp_context* ctx) {
     recompinput::poll_inputs();
 }
 
+#ifdef __SWITCH__
+// Milliseconds since the console booted (switch/main_switch.cpp): the game's own prints carry it, to time the start.
+extern "C" unsigned long long dk64nx_ms_since_boot();
+#endif
+
 extern "C" void recomp_puts(uint8_t* rdram, recomp_context* ctx) {
     PTR(char) cur_str = _arg<0, PTR(char)>(rdram, ctx);
     u32 length = _arg<1, u32>(rdram, ctx);
+#ifdef __SWITCH__
+    printf("[%llu ms] ", dk64nx_ms_since_boot());
+#endif
 
     for (u32 i = 0; i < length; i++) {
         fputc(MEM_B(i, (gpr)cur_str), stdout);
@@ -473,6 +481,9 @@ extern "C" void boot_osPiRawStartDma(uint8_t* rdram, recomp_context* ctx) {
 
     assert(direction == 0); // Only reads
 
+#ifdef __SWITCH__
+    printf("[%llu ms] ", dk64nx_ms_since_boot());
+#endif
     printf("boot_osPiRawStartDma: Rom %08X, Ram %08X, Size: %08X\n", device_address, rdram_address, size);
 
     // Complete the DMA synchronously (the game immediately waits until it's done anyways)
