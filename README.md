@@ -47,7 +47,7 @@ performance overlay is on, top left.</sub></p>
 
 ### Copy the files
 
-Download `DK64Recomp-NX-v1.1.0.zip` from [Releases](https://github.com/Trinalord777/DK64Recomp-NX/releases) and
+Download `DK64Recomp-NX-v1.1.1.zip` from [Releases](https://github.com/Trinalord777/DK64Recomp-NX/releases) and
 extract it to the root of the SD card, then add your ROM next to the `.nro` (its file name does not matter). The SD
 card must end up like this:
 
@@ -56,7 +56,7 @@ sdmc:/switch/dk64recomp/
 ├── dk64recomp.nro              the game
 ├── cheats.cht                  the GameShark codes (optional, see Cheats)
 ├── Donkey Kong 64 (USA).z64    your ROM
-├── mods/                       mods you add (.nrm files, optional)
+├── mods/                       Tag Anywhere and its Sparkles (included), and mods you add
 └── (created by the game: DK64.z64, saves/, nx_options.txt, cheats_enabled.txt, mod_config/,
      shaders/, dk64recomp.log, dk64recomp.prev.log)
 ```
@@ -75,8 +75,8 @@ files. At the first start the ROM is checked and a copy is stored as `DK64.z64`.
 - Saves: `sdmc:/switch/dk64recomp/saves/`. Back up this folder, especially before playing with cheats or warps:
   the game saves on its own.
 - Settings from NX Options: `nx_options.txt`, written when the menu closes.
-- To update, extract the new release's zip over the old files: it replaces `dk64recomp.nro` and `cheats.cht`.
-  Saves, settings and mods stay.
+- To update, extract the new release's zip over the old files: it replaces `dk64recomp.nro`, `cheats.cht` and the
+  two Tag Anywhere mods. Saves, settings and your other mods stay.
 - If something goes wrong: each run writes `dk64recomp.log`, and the previous run's log is kept as
   `dk64recomp.prev.log` (after a crash it holds the faulting address). Attach both when you open an
   [issue](https://github.com/Trinalord777/DK64Recomp-NX/issues).
@@ -174,6 +174,27 @@ Story skip, lightning flashes, cutscene borders and draw distance, the PC versio
 Mods for DK64: Recompiled (`.nrm` files) go in `sdmc:/switch/dk64recomp/mods/`. Each one gets a group in the
 **Mods** section: turning a mod on or off applies at the next start, most of its options at once.
 
+#### Tag Anywhere (included)
+
+<p align="center">
+  <img src="docs/screenshots/tag-anywhere.gif" width="80%" alt="Tag Anywhere with its sparkles, switching Kongs on a DK Isles beach">
+</p>
+
+The release comes with two mods, already in `mods/`:
+
+- **[Tag Anywhere](https://github.com/Killklli/DK64TagAnywhereRecomp)** 1.0.3: switch Kong from (almost) anywhere,
+  without going back to a tag barrel. **D-Pad Left** goes back through the Kongs, **D-Pad Right** forward.
+- **[Tag Anywhere Sparkles](https://github.com/theballaam96/RecompTAEffect)** 1.0.1: a sparkle and a sound when you
+  tag, each with its own switch in the mod's options.
+
+<p align="center">
+  <img src="docs/screenshots/mods-menu.jpg" width="80%" alt="NX Options, Enhancements tab, Mods section with Tag Anywhere and Tag Anywhere Sparkles">
+</p>
+
+They start turned off: turn on **Tag Anywhere Sparkles** in *Enhancements → Mods* (it brings Tag Anywhere with it), then
+**Restart Game**. Both are public domain (CC0); the version in the zip is the one of each project's release.
+Other mods, such as Exit to Isles or the French translation, are downloaded on their own.
+
 ### Cheats
 
 The GameShark codes of `cheats.cht`, grouped by Kong, in libretro's format. The file in the release is
@@ -212,6 +233,11 @@ Known issues:
 - **About 10 s of black screen at the start** before the Nintendo logo (12.0 s at 1020 MHz, 9.7 s at 1428 MHz).
 
 ## Changelog
+
+### 2026-10-11: v1.1.1
+
+- **Tag Anywhere** and **Tag Anywhere Sparkles** are included in `mods/` (turn them on in *Enhancements → Mods*).
+  The game itself is the same as v1.1.0: same `dk64recomp.nro`.
 
 ### 2026-10-10: v1.1.0
 
@@ -314,6 +340,9 @@ N64 it runs on, is their work; this repository adds the layer that runs it on th
   recipe, and the layout NX Options follows.
 - **[devkitPro](https://devkitpro.org)** and **[libnx](https://github.com/switchbrew/libnx)**: the Switch toolchain.
 - **[Horizon OC](https://github.com/Horizon-OC/Horizon-OC)**: the clocks behind the Clock Profile options.
+- **[Tag Anywhere](https://github.com/Killklli/DK64TagAnywhereRecomp)** (Killklli, after Isotarge's
+  [ROM hack](https://github.com/Isotarge/dk64-tag-anywhere) and its many authors) and
+  **[Tag Anywhere Sparkles](https://github.com/theballaam96/RecompTAEffect)** (Ballaam): the two mods in the release.
 
 If you enjoy this port, the projects above are where the credit belongs.
 
