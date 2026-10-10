@@ -18,21 +18,10 @@ threading model. The PC version is built and released from upstream; its README 
   <img src="docs/screenshots/gameplay.jpg" width="49%" alt="Donkey Kong on DK Isles">
   <img src="docs/screenshots/cranky.jpg" width="49%" alt="Cranky's lab cutscene">
   <img src="docs/screenshots/hud.jpg" width="49%" alt="HUD at the right screen edge">
+  <img src="docs/screenshots/japes-path.jpg" width="49%" alt="Jungle Japes, on the way to Cranky's lab">
+  <img src="docs/screenshots/bonus-well-done.jpg" width="49%" alt="A bonus barrel won">
 </p>
 <p align="center"><sub>Captured on a Nintendo Switch with the console's Capture button.</sub></p>
-
-<p align="center">
-  <img src="docs/screenshots/isles-beach.jpg" width="49%" alt="DK Isles beach at 60 fps">
-  <img src="docs/screenshots/isles-pads.jpg" width="49%" alt="DK Isles, the numbered pads and Lanky's barrel">
-  <img src="docs/screenshots/japes.jpg" width="49%" alt="Jungle Japes">
-  <img src="docs/screenshots/factory.jpg" width="49%" alt="Frantic Factory">
-  <img src="docs/screenshots/factory-lobby.jpg" width="49%" alt="Frantic Factory's lobby">
-  <img src="docs/screenshots/galleon.jpg" width="49%" alt="Swimming in Gloomy Galleon">
-  <img src="docs/screenshots/fungi.jpg" width="49%" alt="Fungi Forest">
-  <img src="docs/screenshots/caves.jpg" width="49%" alt="Crystal Caves">
-</p>
-<p align="center"><sub>Through the levels at 60 fps, captured on the console with the developer test server; the
-performance overlay is on, top left.</sub></p>
 
 ## What you need
 
