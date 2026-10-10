@@ -25,6 +25,8 @@ namespace nx::dev {
     // Dev Tools > Game > Map & Position Overlay, after the Paper Mario port's Value Viewer: on, and its text.
     bool overlay_shown();
     std::string overlay_text();
+    // The current file's play time in seconds, as the file select shows it; -1 outside a single-player adventure.
+    long play_time_seconds();
     // Warp To any map and exit, taken by the game thread at its next frame (dev harness warp command).
     void request_warp(int map, int exit);
 }

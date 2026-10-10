@@ -31,6 +31,9 @@ namespace nx {
         MenuSize,
         MasterVolume,
         TextureFilter,
+        InputViewer,
+        GameplayTimer,
+        FrameMode,
         Count
     };
 
@@ -64,5 +67,9 @@ namespace nx {
     // Frames shown per second: 30 is the game's own rate; above it, some of its frames get an in-between image
     // (all of them at 60).
     inline int target_fps() { return get(Setting::FrameRate); }
-    inline bool interpolating() { return target_fps() > 30; }
+    // Above 30 fps: in-between images (the game keeps its 30 steps per second), or, in the True mode, frames of the
+    // game itself, as fast as the chosen rate.
+    inline bool above_30() { return target_fps() > 30; }
+    inline bool true_frames() { return above_30() && get(Setting::FrameMode) == 1; }
+    inline bool interpolating() { return above_30() && !true_frames(); }
 }

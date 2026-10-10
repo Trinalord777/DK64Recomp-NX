@@ -46,7 +46,7 @@ namespace {
          0, {}, 0, 100, 10, false, "%"},
         {"Audio", "music_volume", "Music Volume", "Background music volume.", 100, {}, 0, 100, 5, false, "%"},
         {"Audio", "sound_volume", "Sound Effects Volume", "Sound effects volume.", 100, {}, 0, 100, 5, false, "%"},
-        {"Display", "show_fps", "Show FPS", "Frames shown per second, in the top left corner.", 0, OFF_ON},
+        {"Overlays", "show_fps", "Show FPS", "Frames shown per second, in the top left corner.", 0, OFF_ON},
         {"Display", "aspect_ratio", "Aspect Ratio",
          "16:9 fills the screen. 4:3 shows the original framing with black bars on the sides.",
          0, {"16:9", "4:3"}, 0, 0, 0, true},
@@ -70,7 +70,7 @@ namespace {
         {"Controls", "face_buttons", "Face Buttons",
          "Flipped swaps the A and B buttons in the game (not in this menu).",
          0, {"Normal", "Flipped"}},
-        {"Display", "performance_overlay", "Performance Overlay",
+        {"Overlays", "performance_overlay", "Performance Overlay",
          "Top left: frames shown per second, the time of each pass of a frame (two at 60 fps: the real image and "
          "the in-between one) and the screen refreshes that showed nothing new. Below 16.7 ms per frame, 60 fps holds.",
          0, OFF_ON},
@@ -86,6 +86,17 @@ namespace {
          "How textures are smoothed: Standard bilinear filtering, or the N64's own 3-point filter, sharper and closer "
          "to the console. Every shader is compiled again at the next start.",
          0, {"Standard", "N64 3-Point"}, 0, 0, 0, true},
+        {"Overlays", "input_viewer", "Input Viewer",
+         "The buttons and sticks being pressed, in the bottom right corner, as the HarbourMasters ports show them.",
+         0, OFF_ON},
+        {"Overlays", "gameplay_timer", "Gameplay Timer",
+         "The file's play time, the one the file select shows, in the top right corner while playing an adventure.",
+         0, OFF_ON},
+        {"Performance", "frame_mode", "Frame Rate Mode",
+         "Above 30 fps. Interpolated: the game keeps its 30 steps per second and in-between images are drawn, as on PC. "
+         "True (experimental): the game itself runs up to the chosen rate, as DK64 does in Jetpac; what its engine does "
+         "not scale by the frame's length runs faster. The DK Rap and the intros stay at 30.",
+         0, {"Interpolated", "True (experimental)"}},
     };
 
     std::atomic<int> values[COUNT];

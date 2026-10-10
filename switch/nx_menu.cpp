@@ -51,9 +51,9 @@ namespace {
     constexpr const char* TAB_NAMES[TAB_COUNT] = {"Settings", "Enhancements", "Dev Tools"};
     // Settings of the Settings and Enhancements tabs, in display order; mods and cheats follow the Enhancements ones.
     constexpr Setting SETTINGS_TAB[] = {
-        Setting::Resolution, Setting::AspectRatio, Setting::TextureLod, Setting::TextureFilter, Setting::ShowFps,
-        Setting::PerformanceOverlay,
-        Setting::FrameRate, Setting::ClockProfile,
+        Setting::Resolution, Setting::AspectRatio, Setting::TextureLod, Setting::TextureFilter,
+        Setting::ShowFps, Setting::PerformanceOverlay, Setting::InputViewer, Setting::GameplayTimer,
+        Setting::FrameRate, Setting::FrameMode, Setting::ClockProfile,
         Setting::MasterVolume, Setting::MusicVolume, Setting::SoundVolume,
         Setting::FaceButtons,
         Setting::CameraType, Setting::CameraSensitivity, Setting::InvertCamera, Setting::InvertFirstPerson,
@@ -745,9 +745,12 @@ namespace {
         if (zone != before) repeat_at = UINT64_MAX;
     }
 
+    NxPad last_pad;  // read once per frame, also drawn by the Input Viewer
+
     void update_input(uint64_t now) {
         NxPad pad;
         dk64nx_read_pad(&pad);
+        last_pad = pad;
         const uint32_t held = menu_buttons(pad);
         const uint32_t pressed = held & ~previous_buttons;
         previous_buttons = held;
@@ -1104,6 +1107,59 @@ namespace {
         draw->AddText({20.0f, 16.0f}, OVERLAY_TEXT, text);
     }
 
+    // Settings > Overlays > Input Viewer, bottom right: the face buttons, the shoulders, the D-pad, - and +, and each
+    // stick's position in its circle; pressed buttons in the theme's accent.
+    void draw_input_viewer(ImVec2 screen) {
+        const nx::menu::Theme& theme = look();
+        ImDrawList* draw = ImGui::GetForegroundDrawList();
+        const uint32_t b = last_pad.buttons;
+        const float unit = 14.0f;
+        const ImVec2 origin{screen.x - 24.0f - 22 * unit, screen.y - 24.0f - 11 * unit};
+        const ImU32 off = IM_COL32(40, 40, 44, 200);
+        const ImU32 edge = IM_COL32(230, 230, 230, 160);
+        draw->AddRectFilled({origin.x - 10, origin.y - 10}, {origin.x + 22 * unit + 10, origin.y + 11 * unit + 10},
+                            IM_COL32(0, 0, 0, 120), 10.0f);
+        const auto key = [&](float x, float y, float w, float h, uint32_t mask, const char* text) {
+            const ImVec2 min{origin.x + x * unit, origin.y + y * unit};
+            const ImVec2 max{min.x + w * unit, min.y + h * unit};
+            draw->AddRectFilled(min, max, (b & mask) ? theme.accent : off, 5.0f);
+            draw->AddRect(min, max, edge, 5.0f);
+            const ImVec2 size = ImGui::CalcTextSize(text);
+            draw->AddText(ImGui::GetFont(), ImGui::GetFontSize() * 0.6f,
+                          {(min.x + max.x - size.x * 0.6f) / 2, (min.y + max.y - size.y * 0.6f) / 2},
+                          (b & mask) ? theme.on_accent : OVERLAY_TEXT, text);
+        };
+        const auto stick = [&](float cx, float cy, float x, float y, uint32_t mask) {
+            const ImVec2 c{origin.x + cx * unit, origin.y + cy * unit};
+            const float r = 2.6f * unit;
+            draw->AddCircleFilled(c, r, (b & mask) ? theme.box : off, 32);
+            draw->AddCircle(c, r, edge, 32, 1.5f);
+            draw->AddCircleFilled({c.x + x * (r - 6), c.y - y * (r - 6)}, 6.0f, theme.knob, 16);
+        };
+        key(0, 0, 4, 1.5f, NX_ZL, "ZL");  key(4.5f, 0, 4, 1.5f, NX_L, "L");
+        key(13.5f, 0, 4, 1.5f, NX_R, "R"); key(18, 0, 4, 1.5f, NX_ZR, "ZR");
+        stick(3, 5, last_pad.lx, last_pad.ly, NX_LSTICK);
+        stick(15.5f, 8.2f, last_pad.rx, last_pad.ry, NX_RSTICK);
+        key(9, 2.2f, 1.6f, 1.6f, NX_MINUS, "-"); key(11.4f, 2.2f, 1.6f, 1.6f, NX_PLUS, "+");
+        key(6.2f, 6.6f, 1.6f, 1.6f, NX_UP, "^"); key(6.2f, 9.4f, 1.6f, 1.6f, NX_DOWN, "v");
+        key(4.8f, 8.0f, 1.6f, 1.6f, NX_LEFT, "<"); key(7.6f, 8.0f, 1.6f, 1.6f, NX_RIGHT, ">");
+        key(19.6f, 4.6f, 1.8f, 1.8f, NX_A, "A"); key(17.8f, 6.4f, 1.8f, 1.8f, NX_B, "B");
+        key(17.8f, 2.8f, 1.8f, 1.8f, NX_X, "X"); key(16.0f, 4.6f, 1.8f, 1.8f, NX_Y, "Y");
+    }
+
+    // Settings > Overlays > Gameplay Timer, top right: the file's play time while playing an adventure.
+    void draw_gameplay_timer(float screen_width) {
+        const long seconds = nx::dev::play_time_seconds();
+        if (seconds < 0) return;
+        char text[32];
+        std::snprintf(text, sizeof(text), "%ld:%02ld:%02ld", seconds / 3600, seconds / 60 % 60, seconds % 60);
+        ImDrawList* draw = ImGui::GetForegroundDrawList();
+        const ImVec2 size = ImGui::CalcTextSize(text);
+        const float left = screen_width - 28.0f - size.x;
+        draw->AddRectFilled({left - 8.0f, 12.0f}, {screen_width - 12.0f, 20.0f + size.y}, IM_COL32(0, 0, 0, 160), 6.0f);
+        draw->AddText({left, 16.0f}, OVERLAY_TEXT, text);
+    }
+
     // Dev Tools > Game > Map & Position Overlay, bottom left.
     void draw_position(float screen_height) {
         const std::string text = nx::dev::overlay_text();
@@ -1135,6 +1191,8 @@ namespace {
         if (is_open) draw_menu(io.DisplaySize.x, io.DisplaySize.y);
         if (nx::get(Setting::ShowFps) != 0 || nx::get(Setting::PerformanceOverlay) != 0) draw_fps();
         if (nx::dev::overlay_shown() && !is_open) draw_position(io.DisplaySize.y);  // the menu shows the same rows
+        if (nx::get(Setting::InputViewer) != 0 && !is_open) draw_input_viewer(io.DisplaySize);
+        if (nx::get(Setting::GameplayTimer) != 0 && !is_open) draw_gameplay_timer(io.DisplaySize.x);
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
@@ -1162,7 +1220,7 @@ extern "C" void dk64nx_menu_on_swap(int width, int height) {
     update_input(now);
     nx::cheats::apply();
     if (!is_open && nx::get(Setting::ShowFps) == 0 && nx::get(Setting::PerformanceOverlay) == 0 &&
-        !nx::dev::overlay_shown()) {
+        nx::get(Setting::InputViewer) == 0 && nx::get(Setting::GameplayTimer) == 0 && !nx::dev::overlay_shown()) {
         return;
     }
     if (imgui_state == ImGuiState::NotStarted) {

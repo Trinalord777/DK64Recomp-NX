@@ -263,13 +263,21 @@ void dk64nx_gliden64_save_shaders();
 void dk64nx_remote_on_swap(int width, int height);
 #endif
 
+unsigned long long dk64nx_ms_since_boot();  // main_switch.cpp
+
 m64p_error nx_VidExt_GL_SwapBuffers(void) {
-    // At 60 fps each display list is processed twice and a frame is presented every VI. The copy of each frame back
-    // to RDRAM (double-buffered read-back) did not fit: it stalled ProcessDList for ~12 ms (20 ms -> 7.3 ms per pass
-    // in game). DK64's pause and transitions look the same without it. At 30 fps it stays as it was.
+    // Above 30 fps a frame is presented every VI (each display list processed twice, or one per VI in the True
+    // mode). The copy of each frame back to RDRAM (double-buffered read-back) did not fit: it stalled ProcessDList
+    // for ~12 ms (20 ms -> 7.3 ms per pass in game). DK64's pause and transitions look the same without it. At 30 fps
+    // it stays as it was.
     static bool fast = false;
     static int applied_interval = -1;
-    const bool wants_fast = nx::interpolating();
+    static bool first_frame = true;
+    if (first_frame) {
+        first_frame = false;
+        printf("[DK64NX] step: first frame presented (%llu ms)\n", dk64nx_ms_since_boot());
+    }
+    const bool wants_fast = nx::above_30();
     if (wants_fast != fast) {
         dk64nx_gliden64_set("copy", wants_fast ? 0 : 2);  // 2: GLideN64's default, ctDoubleBuffer
         fast = wants_fast;

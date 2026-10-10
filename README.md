@@ -91,12 +91,14 @@ the pad while the menu is open.
 
 | Tab | Contents |
 |---|---|
-| Settings | Display (resolution 2x or 3x, aspect ratio 16:9 or 4:3, texture LOD, texture filter, show FPS, performance overlay), Performance (frame rate 30 to 60, clock profile), Audio (master, music and sound effects volume), Controls (face buttons), Camera (type, analog sensitivity, inversions), Menu (orange or gray theme, opacity, size) |
+| Settings | Display (resolution 2x or 3x, aspect ratio 16:9 or 4:3, texture LOD, texture filter), Overlays (show FPS, performance overlay, input viewer, gameplay timer), Performance (frame rate 30 to 60, frame rate mode, clock profile), Audio (master, music and sound effects volume), Controls (face buttons), Camera (type, analog sensitivity, inversions), Menu (orange or gray theme, opacity, size) |
 | Enhancements | Gameplay (story skip, lightning flashes, cutscene borders, draw distance), Mods (one group per mod: on or off, and its options), Cheats (the GameShark codes of `cheats.cht`, grouped by Kong) |
 | Dev Tools | Game (map, Kong, position, a map and position overlay, clocks), Warp (to DK Isles or any level), Inventory (coins, ammo, oranges, crystal coconuts, film, melons, health), Unlocks (give every Kong all its moves, refill the consumables), Flags (Kong unlocks, any permanent flag), Interpolation statistics |
 
 **Performance overlay** shows, top left, the frames per second, the time of each pass of a frame (two at 60 fps:
-the real image and the in-between one) and the screen refreshes per second that showed nothing new.
+the real image and the in-between one) and the screen refreshes per second that showed nothing new. **Input
+viewer** draws the pad, bottom right, its buttons lit while pressed and its sticks where they point. **Gameplay
+timer** shows the file's play time, top right, the one the file select shows, while playing an adventure.
 
 **Frame rate** above 30 is experimental: the game still runs at its original 30 fps, and an in-between image,
 with every object halfway between two of its frames, is drawn and shown between them, as the PC version does with

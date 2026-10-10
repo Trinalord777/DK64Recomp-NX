@@ -7,6 +7,7 @@
 //    one), forced with its override command. No frequency is invented: a module with no docked value is left
 //    alone. Overrides do not expire, so a marker file records them and the next start releases them if the game
 //    crashed in between.
+#include <algorithm>
 #include <cstdio>
 #include <initializer_list>
 
@@ -214,12 +215,58 @@ void dk64nx_perf_stop() {
 }
 
 // Game logic pacing, read by the patches every frame (getFrameDelta, updateLag, calculateLagBoost). It stays at the
-// original 30 fps, two VIs per frame: DK64's engine does not scale everything by the frame's lag, and frames of one
-// VI ran the game too fast on the console. 60 fps comes from interpolated frames instead (gliden64_rt64ex.cpp).
-extern "C" void recomp_nx_get_frame_vis(uint8_t* rdram, recomp_context* ctx) {
-    _return(ctx, static_cast<s32>(2));
+// original 30 fps, two VIs per frame, unless Frame Rate Mode is True: then the engine runs frames of a single VI
+// (lag 1), as it does in Jetpac and the arcade, scaling its physics by each frame's lag. Not everything follows the
+// lag (measured on 2026-10-09: some of the game ran too fast), so the Interpolated mode, 30 steps per second plus
+// in-between images (gliden64_rt64ex.cpp), is the default.
+namespace {
+    constexpr uint32_t CURRENT_MAP = 0x0076A0A8;  // RDRAM offset of current_map (32-bit)
+
+    // The DK Rap and the intro story are timed to their music frame by frame at 30 fps (see timing_fixes.c): they
+    // keep the original pacing whatever the option says. Map ids from lib/dk64_decomp/include/enums.h.
+    bool music_timed_scene(const uint8_t* rdram) {
+        const int32_t map = *reinterpret_cast<const int32_t*>(rdram + CURRENT_MAP);
+        return map == 76 /* DK Rap */ || map == 152 /* Helm intro */ || map == 153 /* DK Theatre */ ||
+               map == 172 /* Rock intro */;
+    }
+
+    s32 true_fps(const uint8_t* rdram) {
+        return nx::true_frames() && !music_timed_scene(rdram) ? nx::target_fps() : 30;
+    }
 }
 
+// Fewest VIs a game frame may last (getFrameDelta, updateLag): 2 at the original 30 fps, else 1.
+extern "C" void recomp_nx_get_frame_vis(uint8_t* rdram, recomp_context* ctx) {
+    _return(ctx, static_cast<s32>(true_fps(rdram) > 30 ? 1 : 2));
+}
+
+// Called once per game frame (calculateLagBoost): the VIs this frame lasts at least, so that frames of 1 and 2 VIs
+// alternate evenly to the chosen rate, e.g. 50 fps = 1, 1, 1, 1, 2 and 45 fps = 1, 1, 2. Game thread only.
+// calculateLagBoost only raises the lag to this value, and a frame that waits 2 VIs measures a lag of 2: once at 2
+// (the 30 fps game), the lag never came down. In the True mode the frame's lag is set here directly, and it is the
+// VIs the frame really took when it ran late: with the lag at 1 whatever the frame cost, DK ran 11% slower at 51 game
+// frames per second (82 units/s instead of 92, measured in DK Isles at 1020 MHz).
 extern "C" void recomp_nx_next_frame_lag(uint8_t* rdram, recomp_context* ctx) {
-    _return(ctx, static_cast<s32>(2));
+    constexpr uint32_t FRAME_LAG = 0x00744478;     // D_global_asm_80744478, the VIs per game frame (u32)
+    constexpr uint32_t VI_COUNT = 0x00767CC4;      // D_global_asm_80767A40.frame_count, +1 per VI
+    constexpr uint32_t LAST_FRAME_VI = 0x0076AF10; // D_global_asm_8076AF10, frame_count when this frame started
+    // ponytail: a longer frame (a load) runs the game slower instead of moving everything 5+ VIs in one step.
+    constexpr int32_t MAX_LATE_LAG = 4;
+    static s32 credit = 0;  // in 1/fps of a VI
+    static s32 credit_fps = 30;
+    const s32 fps = true_fps(rdram);
+    if (fps != credit_fps) {
+        credit = 0;  // a remainder in another rate's units gave one frame of 3 VIs entering the DK Rap
+        credit_fps = fps;
+    }
+    credit += 60;
+    s32 lag = credit / fps;
+    credit %= fps;
+    if (nx::true_frames()) {
+        const int32_t taken = *reinterpret_cast<const int32_t*>(rdram + VI_COUNT) -
+                              *reinterpret_cast<const int32_t*>(rdram + LAST_FRAME_VI);
+        lag = std::max(lag, std::min(taken, MAX_LATE_LAG));
+        *reinterpret_cast<uint32_t*>(rdram + FRAME_LAG) = static_cast<uint32_t>(lag);
+    }
+    _return(ctx, lag);
 }

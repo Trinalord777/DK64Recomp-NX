@@ -29,6 +29,13 @@ namespace {
     constexpr uint32_t GAME_MODE = 0x80755318, GAME_MODE_COPY = 0x80755314;  // game_mode, game_mode_copy: u8
     constexpr uint8_t GAME_MODE_ADVENTURE = 6;            // game_mode_e
     constexpr uint32_t PLAYER_COUNT = 0x807FC928;         // cc_number_of_players, u8
+    // The file's play time (decomp code_450.c, func_global_asm_805FC98C): seconds saved when the file loaded plus the
+    // OSTime since then, stopped at the pause's start while paused.
+    constexpr uint32_t SAVED_PLAY_SECONDS = 0x80750AB0;   // D_global_asm_80750AB0, u32
+    constexpr uint32_t SESSION_START = 0x807445B8;        // D_global_asm_807445B8, OSTime (u64)
+    constexpr uint32_t PAUSE_START = 0x807445C0;          // D_global_asm_807445C0, OSTime
+    constexpr uint32_t GLOBAL_PROPERTIES = 0x807FBB60;    // global_properties_bitfield, bit 1: paused
+    constexpr uint64_t OSTIME_PER_SECOND = 46875000;      // osGetTime counts at 46.875 MHz
     constexpr uint32_t HOMING_AMMO = PLAYER_PROGRESS + 0x2F2;    // u16
     constexpr uint32_t STANDARD_AMMO = PLAYER_PROGRESS + 0x2F0;  // u16
     constexpr uint32_t ORANGES = PLAYER_PROGRESS + 0x2F4;        // u16
@@ -328,6 +335,18 @@ int nx::dev::count() { return static_cast<int>(sizeof(TOOLS) / sizeof(TOOLS[0]))
 const nx::dev::Tool& nx::dev::tool(int index) { return TOOLS[index]; }
 
 bool nx::dev::overlay_shown() { return overlay; }
+
+extern "C" uint64_t osGetTime();  // ultramodern timer.cpp
+
+long nx::dev::play_time_seconds() {
+    if (!in_adventure()) return -1;
+    const auto ostime = [](uint32_t address) { return uint64_t{nx::ram::u32(address)} << 32 | nx::ram::u32(address + 4); };
+    const bool paused = (nx::ram::u32(GLOBAL_PROPERTIES) & 2) != 0;
+    const uint64_t now = paused ? ostime(PAUSE_START) : osGetTime();
+    const uint64_t start = ostime(SESSION_START);
+    const uint64_t elapsed = now > start ? now - start : 0;
+    return static_cast<long>(nx::ram::u32(SAVED_PLAY_SECONDS) + elapsed / OSTIME_PER_SECOND);
+}
 std::string nx::dev::overlay_text() { return map_text() + "    " + position_text(); }
 
 void nx::dev::request_warp(int map, int exit) {

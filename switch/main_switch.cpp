@@ -61,6 +61,9 @@ extern "C" void recomp_entrypoint(uint8_t* rdram, recomp_context* ctx);
 gpr get_entrypoint_address();
 extern RspUcodeFunc n_aspMain;
 
+// Milliseconds since the console booted, for the start-up timeline in the log (also core_switch.cpp).
+extern "C" unsigned long long dk64nx_ms_since_boot() { return armTicksToNs(armGetSystemTick()) / 1000000; }
+
 namespace {
     const std::filesystem::path DATA_DIR = "sdmc:/switch/dk64recomp";
     const std::u8string GAME_ID = u8"DK64";
@@ -70,8 +73,9 @@ namespace {
     constexpr int SCREEN_WIDTH = 1280;
     constexpr int SCREEN_HEIGHT = 720;
 
+    // With the time since the console booted, to see where the start of the game goes.
     void step(const char* what) {
-        printf("[DK64NX] step: %s\n", what);
+        printf("[DK64NX] step: %s (%llu ms)\n", what, dk64nx_ms_since_boot());
     }
 
     [[noreturn]] void log_terminate() {
@@ -317,8 +321,8 @@ int main(int argc, char** argv) {
     if (argc > 0) dk64nx_program_path = argv[0];
     std::set_terminate(log_terminate);
     init_logging();
-    printf("[DK64NX] DK64: Recompiled %s for Switch, applet type %d\n", VERSION_STRING.c_str(),
-           static_cast<int>(appletGetAppletType()));
+    printf("[DK64NX] DK64: Recompiled %s for Switch, applet type %d (%llu ms)\n", VERSION_STRING.c_str(),
+           static_cast<int>(appletGetAppletType()), dk64nx_ms_since_boot());
     nx::load();
     nx::cheats::load();
     dk64nx_perf_start();

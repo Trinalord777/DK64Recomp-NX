@@ -1,5 +1,6 @@
 // Host check of nx_settings.cpp: c++ -std=c++20 -DNX_SETTINGS_PATH='"/tmp/x.txt"' nx_settings.cpp tests/nx_settings_test.cpp
 #include <cassert>
+#include <cstring>
 #include <cstdio>
 #include <utility>
 
@@ -63,6 +64,16 @@ int main() {
     nx::load();
     assert(nx::get(Setting::MenuTheme) == 1);
     std::remove(NX_SETTINGS_PATH);
+
+    // SETTINGS[] is indexed by the enum: an entry out of order made each setting read its neighbour's value (the
+    // Input Viewer switch drove the Frame Rate Mode). Every key must sit at its enum's index.
+    const std::pair<Setting, const char*> keys[] = {
+        {Setting::Resolution, "resolution"}, {Setting::FrameRate, "frame_rate_fps"},
+        {Setting::ClockProfile, "clock_profile"}, {Setting::MenuTheme, "menu_theme"},
+        {Setting::MenuOpacity, "menu_opacity"}, {Setting::MasterVolume, "master_volume"},
+        {Setting::TextureFilter, "texture_filter"}, {Setting::InputViewer, "input_viewer"},
+        {Setting::GameplayTimer, "gameplay_timer"}, {Setting::FrameMode, "frame_mode"}};
+    for (const auto& [setting, key] : keys) assert(std::strcmp(nx::info(setting).key, key) == 0);
 
     std::puts("nx_settings: OK");
     return 0;
