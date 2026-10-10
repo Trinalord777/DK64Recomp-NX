@@ -264,6 +264,11 @@ static f32 cut_translation = 5000.0f;
 // (75% with an in-between), 15 ms lost 2 (68%), 11-13 ms lost 2 (50%). Dev harness: gl pass2max <microseconds>.
 static u32 pass2_max_us = 15000;
 
+// After a frame over that budget, the next ones get no in-between image either for this many frames (15: half a
+// second): a view at the edge of the budget otherwise alternates 60 and 30 fps frame by frame, which shows more
+// than a steady 30. A frame over the budget during the hold starts it again. Dev harness: gl hysteresis <frames>.
+static u32 hysteresis_frames = 15;
+
 // Dev harness experiment (gl lerpmask): which matrices the second pass interpolates. 1: paired by group ID,
 // 2: paired by rank and likeness, 4: projections. 0 makes the in-between image a plain second render of the frame.
 static u32 lerp_mask = 7;
@@ -275,6 +280,8 @@ static u32 lerp_mask = 7;
 // draws what the real frame draws. Trade-off: something leaving the view that the real frame culls is already gone
 // from the in-between, a sliver at the screen edge 8 ms early, instead of a repeated image. gl cullreplay 0|1.
 static bool replay_decisions = true;
+
+bool g_dk64nxSkipKnownMaxY = true;  // GraphicsDrawer::_maxYKnown
 
 // Graphics thread: GLideN64 saves its shaders storage (the combiners seen so far, compiled again at the next start) only
 // at shutdown, which the game closed from the HOME menu never reaches: every session then compiled each new effect in
@@ -299,9 +306,24 @@ extern "C" int dk64nx_gliden64_set(const char* name, int value) {
         lerp_mask = static_cast<u32>(value);
         return previous;
     }
+    if (strcmp(name, "clip") == 0) {
+        const int previous = static_cast<int>(config.generalEmulation.enableClipping);
+        config.generalEmulation.enableClipping = static_cast<u32>(value);
+        return previous;
+    }
+    if (strcmp(name, "maxyskip") == 0) {
+        const int previous = g_dk64nxSkipKnownMaxY ? 1 : 0;
+        g_dk64nxSkipKnownMaxY = value != 0;
+        return previous;
+    }
     if (strcmp(name, "cullreplay") == 0) {
         const int previous = replay_decisions ? 1 : 0;
         replay_decisions = value != 0;
+        return previous;
+    }
+    if (strcmp(name, "hysteresis") == 0) {
+        const int previous = static_cast<int>(hysteresis_frames);
+        hysteresis_frames = static_cast<u32>(value);
         return previous;
     }
     if (strcmp(name, "pass2max") == 0) {
@@ -438,6 +460,7 @@ namespace {
     std::map<u32, InBetween> in_between;
     FrameBuffer* in_between_shown = nullptr;
     u32 frames_begun = 0;
+    u32 hold_until = 0;  // frames_begun at which the hysteresis hold ends
     std::map<u32, u32> frame_in_buffer;  // by color buffer address, for the dev harness
 
     struct MatchStats {
@@ -450,6 +473,7 @@ namespace {
         u64 interpolated = 0;
         u64 camera_cuts = 0;
         u64 over_budget = 0;    // frames whose first pass was too long for a second one
+        u64 held = 0;           // ... and frames after one, still in its hysteresis hold
         u64 unmatched = 0;      // second-pass matrices left as they are
         u64 mostly_unmatched = 0;  // in-between images where most matrices were left as they are (no motion)
         u64 camera_unmatched = 0;  // in-between images whose projection (camera) matrix was left as it is
@@ -827,8 +851,10 @@ extern "C" void dk64nx_interp_frame_begin() {
     reset_matrix_groups();
 }
 
-// After the first pass, which took first_pass_us. False when this frame gets no in-between image.
-extern "C" bool dk64nx_interp_begin_second_pass(u32 first_pass_us) {
+// After the first pass, which took first_pass_us. False when this frame gets no in-between image; wanted is false on
+// the frames the chosen frame rate (between 30 and 60) leaves without one. Called for every frame either way: the
+// bookkeeping of the buffer just drawn (a stale in-between dropped, the frame it holds) must not be skipped.
+extern "C" bool dk64nx_interp_begin_second_pass(u32 first_pass_us, bool wanted) {
     FrameBuffer* buffer = frameBufferList().getCurrent();
     if (buffer != nullptr) {
         in_between.erase(buffer->m_startAddress);  // that image belonged to an older frame
@@ -843,14 +869,19 @@ extern "C" bool dk64nx_interp_begin_second_pass(u32 first_pass_us) {
         proj_dump = text;
     }
     const bool jumped = camera_jumped();  // always measured, for the histograms
-    if (camera_cut || jumped) {
+    // Counted, and the hysteresis hold started, on every frame, also on those the frame rate leaves without an
+    // in-between image, so the readouts and the hold do not depend on the chosen rate.
+    const bool cut = camera_cut || jumped;
+    const bool over = !cut && first_pass_us > pass2_max_us;
+    if (cut || over) {
+        if (over) hold_until = frames_begun + hysteresis_frames;
         std::lock_guard lock{match_mutex};
-        match_stats.camera_cuts++;
-        return false;
+        (cut ? match_stats.camera_cuts : match_stats.over_budget)++;
     }
-    if (first_pass_us > pass2_max_us) {
+    if (!wanted || cut || over) return false;
+    if (static_cast<s32>(hold_until - frames_begun) > 0) {
         std::lock_guard lock{match_mutex};
-        match_stats.over_budget++;
+        match_stats.held++;
         return false;
     }
     if (matrices_previous.empty() || buffer == nullptr || config.video.multisampling != 0) return false;
@@ -1088,9 +1119,9 @@ extern "C" int dk64nx_interp_stats(char* out, int size) {
     };
     const std::string diff_ops = histogram(s.diff_ops);
     const std::string common_ops = histogram(s.common_ops);
-    return snprintf(out, size, "frames=%llu interpolated=%llu cuts=%llu over_budget=%llu mostly_unmatched=%llu camera_unmatched=%llu id_paired=%llu id_missing=%llu ignored=%llu rank_disagree=%llu identical_preferred=%llu pass2_diverged=%llu vertices_diverged=%llu commands_diverged=%llu diff_ops=%s common_ops=%s command_diffs=%llu decision_flips=%llu unmatched/frame=%.1f matrices/frame=%.0f equal=%.1f%% close=%.1f%% far=%.1f%% count_changed=%llu proj_rot(<.05/.1/.25/.5/1/more)=%s proj_trans(<50/200/1k/5k/20k/more)=%s",
+    return snprintf(out, size, "frames=%llu interpolated=%llu cuts=%llu over_budget=%llu held=%llu mostly_unmatched=%llu camera_unmatched=%llu id_paired=%llu id_missing=%llu ignored=%llu rank_disagree=%llu identical_preferred=%llu pass2_diverged=%llu vertices_diverged=%llu commands_diverged=%llu diff_ops=%s common_ops=%s command_diffs=%llu decision_flips=%llu unmatched/frame=%.1f matrices/frame=%.0f equal=%.1f%% close=%.1f%% far=%.1f%% count_changed=%llu proj_rot(<.05/.1/.25/.5/1/more)=%s proj_trans(<50/200/1k/5k/20k/more)=%s",
                     (unsigned long long)s.frames, (unsigned long long)s.interpolated, (unsigned long long)s.camera_cuts,
-                    (unsigned long long)s.over_budget, (unsigned long long)s.mostly_unmatched, (unsigned long long)s.camera_unmatched, (unsigned long long)s.id_paired, (unsigned long long)s.id_missing,
+                    (unsigned long long)s.over_budget, (unsigned long long)s.held, (unsigned long long)s.mostly_unmatched, (unsigned long long)s.camera_unmatched, (unsigned long long)s.id_paired, (unsigned long long)s.id_missing,
                     (unsigned long long)s.ignored, (unsigned long long)s.rank_disagree,
                     (unsigned long long)s.identical_preferred, (unsigned long long)s.pass2_diverged,
                     (unsigned long long)s.vertices_diverged, (unsigned long long)s.commands_diverged,
@@ -1160,3 +1191,4 @@ extern "C" int dk64nx_interp_pair_dump(char* out, int size) {
     std::lock_guard lock{capture_mutex};
     return snprintf(out, size, "%s", pair_dump.c_str());
 }
+

@@ -26,7 +26,7 @@ namespace {
 
 // VI thread. False when the timer should pace this VI: 30 fps, or no vsync event from the display.
 extern "C" bool dk64nx_wait_vsync() {
-    if (!nx::interpolated_60()) {
+    if (!nx::interpolating()) {
         dk64nx_vsync_paced = false;
         return false;
     }

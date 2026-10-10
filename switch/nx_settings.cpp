@@ -16,6 +16,8 @@ namespace {
     constexpr int COUNT = static_cast<int>(nx::Setting::Count);
     constexpr std::initializer_list<const char*> INVERT = {"None", "Invert X", "Invert Y", "Invert Both"};
     constexpr std::initializer_list<const char*> OFF_ON = {"Off", "On"};
+    // Before the 30-60 range, the frame rate was a choice saved as frame_rate: 0 for 30 fps, 1 for 60.
+    constexpr const char* LEGACY_FRAME_RATE = "frame_rate";
 
     // Order and values follow nx::Setting and the dk64 enums (include/donk_config.h); labels and defaults
     // follow the PC port (src/game/config.cpp), except the cutscene borders, off as in v1.0.
@@ -55,22 +57,35 @@ namespace {
          "GLideN64's level of detail emulation. On blurs the Kongs' eyes and faces and tints them pink (as reported "
          "in mupen64plus-libretro-nx issue 458); Off draws them sharp.",
          0, OFF_ON, 0, 0, 0, true},
-        {"Performance", "frame_rate", "Frame Rate",
-         "60 fps (experimental): the game still runs at its original speed, and an in-between image is drawn between "
-         "two of its frames, as on PC. Costs one frame of latency.",
-         0, {"30 fps", "60 fps (interpolated)"}},
+        {"Performance", "frame_rate_fps", "Frame Rate",
+         "Frames shown per second. The game runs at its own 30; above that, an in-between image is drawn between two "
+         "of its frames, as on PC: for 1 frame in 6 at 35, every other one at 45, all at 60. On a 60 Hz screen the "
+         "rates between show smooth and held images in turn. Costs one frame of latency.",
+         30, {}, 30, 60, 5, false, " fps"},
         {"Performance", "clock_profile", "Clock Profile",
-         "While in the game. Docked GPU (handheld only): the official docked GPU profile (768 MHz). Horizon OC "
-         "(handheld only): the docked CPU, GPU and RAM clocks set in Horizon OC. CPU Boost (needs Horizon OC): the "
-         "CPU at 1785 MHz, the official boost clock, docked and handheld; it keeps 60 fps steady.",
+         "Clocks while in the game. Docked GPU (handheld only): the official 768 MHz GPU profile. Horizon OC "
+         "(handheld only): the docked clocks set in Horizon OC. CPU Boost (needs Horizon OC): the CPU at 1785 MHz, "
+         "the official boost clock, docked and handheld.",
          0, {"Console Default", "Docked GPU in Handheld", "Horizon OC Docked Clocks", "CPU Boost (Horizon OC)"}},
         {"Controls", "face_buttons", "Face Buttons",
          "Flipped swaps the A and B buttons in the game (not in this menu).",
          0, {"Normal", "Flipped"}},
-        {"Overlay", "performance_overlay", "Performance Overlay",
+        {"Display", "performance_overlay", "Performance Overlay",
          "Top left: frames shown per second, the time of each pass of a frame (two at 60 fps: the real image and "
          "the in-between one) and the screen refreshes that showed nothing new. Below 16.7 ms per frame, 60 fps holds.",
          0, OFF_ON},
+        {"Menu", "menu_theme", "Menu Theme",
+         "Colors of this menu: orange or gray, after DK64's own menus.",
+         0, {"Orange", "Gray"}},
+        {"Menu", "menu_opacity", "Menu Opacity", "How much of the game shows through this menu: less is more.",
+         95, {}, 50, 100, 5, false, "%"},
+        {"Menu", "menu_size", "Menu Size", "Size of the text and the boxes of this menu.", 1, {"Small", "Medium", "Large"}},
+        {"Audio", "master_volume", "Master Volume", "Volume of everything the game plays, music and sound effects.",
+         100, {}, 0, 100, 5, false, "%"},
+        {"Display", "texture_filter", "Texture Filter",
+         "How textures are smoothed: Standard bilinear filtering, or the N64's own 3-point filter, sharper and closer "
+         "to the console. Every shader is compiled again at the next start.",
+         0, {"Standard", "N64 3-Point"}, 0, 0, 0, true},
     };
 
     std::atomic<int> values[COUNT];
@@ -97,6 +112,8 @@ void nx::set(Setting setting, int value) {
 // "key = value" lines; unknown keys and malformed lines are skipped, out-of-range values clamped.
 void nx::load() {
     for (int i = 0; i < COUNT; i++) values[i] = SETTINGS[i].default_value;
+    bool legacy_60 = false;
+    bool rate_saved = false;
     if (FILE* file = std::fopen(SETTINGS_PATH, "r")) {
         char line[128];
         while (std::fgets(line, sizeof(line), file) != nullptr) {
@@ -107,14 +124,17 @@ void nx::load() {
             // strtol saturates instead of overflowing like %d.
             const long value = std::strtol(text, &end, 10);
             if (end == text) continue;
+            if (std::strcmp(key, LEGACY_FRAME_RATE) == 0) legacy_60 = value == 1;
             for (int i = 0; i < COUNT; i++) {
                 if (std::strcmp(key, SETTINGS[i].key) == 0) {
                     set(static_cast<Setting>(i), static_cast<int>(std::clamp(value, -1000L, 1000L)));
+                    rate_saved = rate_saved || static_cast<Setting>(i) == Setting::FrameRate;
                 }
             }
         }
         std::fclose(file);
     }
+    if (legacy_60 && !rate_saved) set(Setting::FrameRate, 60);
     for (int i = 0; i < COUNT; i++) startup_values[i] = values[i];
 }
 

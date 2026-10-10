@@ -225,10 +225,12 @@ namespace {
         for (size_t i = 0; i < duplicated_input_frames * input_channels; i++) {
             swap_buffer[i] = duplicated_sample_buffer[i];
         }
+        // NX Options' Master Volume scales everything the game mixed (music and effects have their own settings).
+        const float gain = (0.5f / 32768.0f) * static_cast<float>(nx::get(nx::Setting::MasterVolume)) / 100.0f;
         // Swap the channels back: the rdram address xor swaps adjacent 16-bit samples.
         for (size_t i = 0; i < sample_count; i += input_channels) {
-            swap_buffer[i + 0 + duplicated_input_frames * input_channels] = audio_data[i + 1] * (0.5f / 32768.0f);
-            swap_buffer[i + 1 + duplicated_input_frames * input_channels] = audio_data[i + 0] * (0.5f / 32768.0f);
+            swap_buffer[i + 0 + duplicated_input_frames * input_channels] = audio_data[i + 1] * gain;
+            swap_buffer[i + 1 + duplicated_input_frames * input_channels] = audio_data[i + 0] * gain;
         }
         for (size_t i = 0; i < duplicated_input_frames * input_channels; i++) {
             duplicated_sample_buffer[i] = swap_buffer[i + sample_count];

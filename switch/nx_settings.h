@@ -26,6 +26,11 @@ namespace nx {
         ClockProfile,
         FaceButtons,
         PerformanceOverlay,
+        MenuTheme,
+        MenuOpacity,
+        MenuSize,
+        MasterVolume,
+        TextureFilter,
         Count
     };
 
@@ -56,5 +61,8 @@ namespace nx {
 
     inline int resolution_factor() { return at_startup(Setting::Resolution) == 0 ? 2 : 3; }
     inline bool widescreen() { return at_startup(Setting::AspectRatio) == 0; }
-    inline bool interpolated_60() { return get(Setting::FrameRate) == 1; }
+    // Frames shown per second: 30 is the game's own rate; above it, some of its frames get an in-between image
+    // (all of them at 60).
+    inline int target_fps() { return get(Setting::FrameRate); }
+    inline bool interpolating() { return target_fps() > 30; }
 }

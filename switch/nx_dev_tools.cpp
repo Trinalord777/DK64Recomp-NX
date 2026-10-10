@@ -22,6 +22,14 @@ namespace {
     constexpr uint32_t PLAYER_PROGRESS = 0x807FC950;      // D_global_asm_807FC950[0], PlayerProgress
     constexpr uint32_t CHARACTER_PROGRESS_SIZE = 0x5E;    // PlayerProgress.character_progress[6], one per Kong
     constexpr uint32_t COINS = 0x06;                      // CharacterProgress.coins, u16
+    // CharacterProgress fields (decomp structs.h), u8 unless noted.
+    constexpr uint32_t MOVES = 0x00, SIMIAN_SLAM = 0x01, WEAPON = 0x02, AMMO_BELT = 0x03, INSTRUMENT = 0x04;
+    constexpr uint32_t INSTRUMENT_ENERGY = 0x08;          // u16
+    constexpr int KONG_COUNT = 5;                         // DK, Diddy, Lanky, Tiny, Chunky (Krusha is the 6th)
+    constexpr uint32_t GAME_MODE = 0x80755318, GAME_MODE_COPY = 0x80755314;  // game_mode, game_mode_copy: u8
+    constexpr uint8_t GAME_MODE_ADVENTURE = 6;            // game_mode_e
+    constexpr uint32_t PLAYER_COUNT = 0x807FC928;         // cc_number_of_players, u8
+    constexpr uint32_t HOMING_AMMO = PLAYER_PROGRESS + 0x2F2;    // u16
     constexpr uint32_t STANDARD_AMMO = PLAYER_PROGRESS + 0x2F0;  // u16
     constexpr uint32_t ORANGES = PLAYER_PROGRESS + 0x2F4;        // u16
     constexpr uint32_t CRYSTALS = PLAYER_PROGRESS + 0x2F6;       // u16, 150 per crystal coconut on screen
@@ -36,6 +44,10 @@ namespace {
     constexpr uint32_t CURRENT_FILE = 0x807467C8;         // current_file, u8
     constexpr int PERMANENT_FLAG_COUNT = 0x316;           // permflag_e
     constexpr int FLAG_DIDDY = 0x06, FLAG_TINY = 0x42, FLAG_LANKY = 0x46, FLAG_CHUNKY = 0x75;  // PERMFLAG_KONG_*
+    // permflag_e: PERMFLAG_ITEM_MOVE_SHOCKWAVE_CAMERA, the training barrels' moves, the 20 Banana Fairies.
+    constexpr int FLAG_CAMERA = 0x179;
+    constexpr int TRAINING_FLAGS[] = {0x182, 0x183, 0x184, 0x185};  // diving, vines, orange and barrel throwing
+    constexpr int FLAG_FIRST_FAIRY = 0x24D, FAIRY_COUNT = 20;
 
     constexpr const char* KONG_NAMES[] = {"DK", "Diddy", "Lanky", "Tiny", "Chunky", "Krusha", "Rambi", "Enguarde"};
 
@@ -88,6 +100,81 @@ namespace {
         nx::ram::set_u8(address, nx::ram::u8(address) ^ (1u << (index % 8)));
     }
 
+    void set_flag(int index) {
+        const uint32_t address = permanent_flags() + index / 8;
+        nx::ram::set_u8(address, nx::ram::u8(address) | (1u << (index % 8)));
+    }
+
+    // Capacities as the game computes them (decomp hud.c, getMaxItemCapacity), for the current Kong's upgrades.
+    uint32_t kong_base(int kong) { return PLAYER_PROGRESS + kong * CHARACTER_PROGRESS_SIZE; }
+    // The current Kong's belt; on Rambi, Enguarde or Krusha (5 and up) the largest of the five Kongs', since which
+    // Kong rides is not kept at a fixed address.
+    int ammo_belt() {
+        if (current_kong() < KONG_COUNT) return nx::ram::u8(kong_base(current_kong()) + AMMO_BELT);
+        int belt = 0;
+        for (int kong = 0; kong < KONG_COUNT; kong++) belt = std::max<int>(belt, nx::ram::u8(kong_base(kong) + AMMO_BELT));
+        return belt;
+    }
+    int max_ammo() { return (1 << std::min(ammo_belt(), 2)) * 50; }
+    int max_oranges() { return ammo_belt() * 5 + 20; }
+    int fairies() {
+        int count = 0;
+        for (int i = 0; i < FAIRY_COUNT; i++) count += flag(FLAG_FIRST_FAIRY + i);
+        return count;
+    }
+    // Crystals and film have a capacity once the camera and shockwave are learned (the game also counts crystals
+    // when a Kong learned its first special move; this keeps to the camera, the case it always covers).
+    int max_crystal_units() { return flag(FLAG_CAMERA) ? fairies() * CRYSTAL_UNITS + 3000 : 0; }
+    int max_film() { return flag(FLAG_CAMERA) ? fairies() + 10 : 0; }
+    int max_instrument_energy(int kong) {
+        const int instrument = nx::ram::u8(kong_base(kong) + INSTRUMENT);
+        if ((instrument & 1) == 0) return 0;
+        int levels = 1;
+        for (int bits = instrument; bits != 0; bits >>= 1) levels++;
+        return levels * 5;
+    }
+
+    // The game keeps permanent flags in a scratch block, not the file's, in DK TV and multiplayer
+    // (getFlagBlockAddress): the Unlocks act in a single-player adventure only, so they never reach a save there.
+    bool in_adventure() {
+        return nx::ram::valid(PLAYER_PROGRESS) && nx::ram::u8(PLAYER_COUNT) < 2 &&
+               (nx::ram::u8(GAME_MODE) == GAME_MODE_ADVENTURE || nx::ram::u8(GAME_MODE_COPY) == GAME_MODE_ADVENTURE);
+    }
+
+    // As the game's own debug code gives them (decomp code_CC800.c, func_global_asm_806C9C80), for every Kong, with
+    // the largest ammo belt and the training barrels' moves.
+    void give_all_moves() {
+        for (int kong = 0; kong < KONG_COUNT; kong++) {
+            nx::ram::set_u8(kong_base(kong) + MOVES, 3);
+            nx::ram::set_u8(kong_base(kong) + SIMIAN_SLAM, 3);
+            nx::ram::set_u8(kong_base(kong) + WEAPON, 7);
+            nx::ram::set_u8(kong_base(kong) + AMMO_BELT, 2);
+            nx::ram::set_u8(kong_base(kong) + INSTRUMENT, 0x0F);
+        }
+        set_flag(FLAG_CAMERA);
+        for (int index : TRAINING_FLAGS) set_flag(index);
+    }
+
+    void refill_consumables() {
+        nx::ram::set_u16(STANDARD_AMMO, static_cast<uint16_t>(max_ammo()));
+        nx::ram::set_u16(HOMING_AMMO, static_cast<uint16_t>(max_ammo()));
+        nx::ram::set_u16(ORANGES, static_cast<uint16_t>(max_oranges()));
+        if (max_crystal_units() > 0) nx::ram::set_u16(CRYSTALS, static_cast<uint16_t>(max_crystal_units()));
+        if (max_film() > 0) nx::ram::set_u16(FILM, static_cast<uint16_t>(max_film()));
+        for (int kong = 0; kong < KONG_COUNT; kong++) {
+            nx::ram::set_u16(kong_base(kong) + INSTRUMENT_ENERGY, static_cast<uint16_t>(max_instrument_energy(kong)));
+        }
+        nx::ram::set_u8(HEALTH, static_cast<uint8_t>(nx::ram::u8(MELONS) * 4));
+    }
+
+    // A button's text: "Done" for a moment after it ran, "Not in game" outside a single-player adventure.
+    uint64_t moves_tick = 0, refill_tick = 0;
+    std::string button_text(const char* text, uint64_t done_tick) {
+        if (!in_adventure()) return "Not in game";
+        const bool recent = done_tick != 0 && armTicksToNs(armGetSystemTick() - done_tick) < 1'500'000'000ull;
+        return recent ? std::string("Done") : std::string(text);
+    }
+
     // CPU, GPU and RAM clocks as the console runs them (clkrst), read once a second while the menu is open.
     std::string clocks_text = "-";
 
@@ -96,28 +183,36 @@ namespace {
     uint64_t interp_window_ms = 0;
     double interp_share = 0.0, interp_cuts = 0.0, interp_unmatched = 0.0;
 
+    std::string map_text() {
+        const uint32_t map = nx::ram::u32(CURRENT_MAP);
+        char buffer[64];
+        std::snprintf(buffer, sizeof(buffer), "0x%02X  %s", map, map < static_cast<uint32_t>(DK64_MAP_COUNT) ? DK64_MAP_NAMES[map] : "?");
+        return std::string(buffer);
+    }
+
+    std::string position_text() {
+        const uint32_t actor = nx::ram::u32(PLAYER_POINTER);
+        if (!nx::ram::valid(actor)) return std::string("-");
+        char buffer[64];
+        std::snprintf(buffer, sizeof(buffer), "%.0f, %.0f, %.0f", nx::ram::f32(actor + ACTOR_POSITION),
+                      nx::ram::f32(actor + ACTOR_POSITION + 4), nx::ram::f32(actor + ACTOR_POSITION + 8));
+        return std::string(buffer);
+    }
+
+    bool overlay = false;
+
     const nx::dev::Tool TOOLS[] = {
-        {"Game", "Map", "The map the game is in: its ID and its name in the DK64 decomp.",
-         [] {
-             const uint32_t map = nx::ram::u32(CURRENT_MAP);
-             char buffer[64];
-             std::snprintf(buffer, sizeof(buffer), "0x%02X  %s", map, map < static_cast<uint32_t>(DK64_MAP_COUNT) ? DK64_MAP_NAMES[map] : "?");
-             return std::string(buffer);
-         }, nullptr},
+        {"Game", "Map", "The map the game is in: its ID and its name in the DK64 decomp.", map_text, nullptr},
         {"Game", "Kong", "The character the player controls.",
          [] {
              const int kong = current_kong();
              return std::string(kong < 8 ? KONG_NAMES[kong] : "?");
          }, nullptr},
-        {"Game", "Position", "The player's x, y and z in the map's units.",
-         [] {
-             const uint32_t actor = nx::ram::u32(PLAYER_POINTER);
-             if (!nx::ram::valid(actor)) return std::string("-");
-             char buffer[64];
-             std::snprintf(buffer, sizeof(buffer), "%.0f, %.0f, %.0f", nx::ram::f32(actor + ACTOR_POSITION),
-                           nx::ram::f32(actor + ACTOR_POSITION + 4), nx::ram::f32(actor + ACTOR_POSITION + 8));
-             return std::string(buffer);
-         }, nullptr},
+        {"Game", "Position", "The player's x, y and z in the map's units.", position_text, nullptr},
+        {"Game", "Map & Position Overlay",
+         "Shows the map and the player's position in the bottom left corner while playing, as the Paper Mario "
+         "port's Value Viewer does.",
+         [] { return std::string(overlay ? "On" : "Off"); }, [](int, bool) { overlay = !overlay; }},
 
         {"Game", "Clocks",
          "CPU, GPU and RAM clocks the console runs at right now, overclock included (refreshed every second).",
@@ -143,24 +238,45 @@ namespace {
         {"Inventory", "Standard Ammo", "Ammunition of the Kongs' guns.",
          [] { return std::to_string(nx::ram::u16(STANDARD_AMMO)); },
          [](int direction, bool wrap) {
-             nx::ram::set_u16(STANDARD_AMMO, static_cast<uint16_t>(stepped(nx::ram::u16(STANDARD_AMMO), direction, wrap, 10, 0, 200)));
+             nx::ram::set_u16(STANDARD_AMMO, static_cast<uint16_t>(stepped(nx::ram::u16(STANDARD_AMMO), direction, wrap, 10, 0, max_ammo())));
          }},
         {"Inventory", "Oranges", "Orange grenades.",
          [] { return std::to_string(nx::ram::u16(ORANGES)); },
          [](int direction, bool wrap) {
-             nx::ram::set_u16(ORANGES, static_cast<uint16_t>(stepped(nx::ram::u16(ORANGES), direction, wrap, 1, 0, 20)));
+             nx::ram::set_u16(ORANGES, static_cast<uint16_t>(stepped(nx::ram::u16(ORANGES), direction, wrap, 1, 0, max_oranges())));
          }},
         {"Inventory", "Crystal Coconuts", "Crystals that power the Kongs' special moves.",
          [] { return std::to_string(nx::ram::u16(CRYSTALS) / CRYSTAL_UNITS); },
          [](int direction, bool wrap) {
-             const int crystals = stepped(nx::ram::u16(CRYSTALS) / CRYSTAL_UNITS, direction, wrap, 1, 0, 20);
+             const int most = max_crystal_units() > 0 ? max_crystal_units() / CRYSTAL_UNITS : 20;  // 20 before the camera
+             const int crystals = stepped(nx::ram::u16(CRYSTALS) / CRYSTAL_UNITS, direction, wrap, 1, 0, most);
              nx::ram::set_u16(CRYSTALS, static_cast<uint16_t>(crystals * CRYSTAL_UNITS));
          }},
         {"Inventory", "Film", "Film for the Banana Fairy camera.",
          [] { return std::to_string(nx::ram::u16(FILM)); },
          [](int direction, bool wrap) {
-             nx::ram::set_u16(FILM, static_cast<uint16_t>(stepped(nx::ram::u16(FILM), direction, wrap, 1, 0, 20)));
+             const int most = max_film() > 0 ? max_film() : 20;  // 20 before the camera
+             nx::ram::set_u16(FILM, static_cast<uint16_t>(stepped(nx::ram::u16(FILM), direction, wrap, 1, 0, most)));
          }},
+        {"Unlocks", "Give All Moves",
+         "Every Kong learns all its moves, gun upgrades, the largest ammo belt and its instrument, plus the training "
+         "barrels' moves and the camera, as the game's own debug code does. Story scenes that teach them may then "
+         "look odd. Save from the pause menu to keep them.",
+         [] { return button_text("Give", moves_tick); },
+         [](int, bool wrap) {
+             if (!wrap || !in_adventure()) return;
+             give_all_moves();
+             moves_tick = armGetSystemTick();
+         }, true},
+        {"Unlocks", "Refill Consumables",
+         "Ammo, homing ammo, oranges, crystal coconuts, film, every Kong's instrument energy and health, to the most "
+         "the current upgrades hold (crystals and film need the camera).",
+         [] { return button_text("Refill", refill_tick); },
+         [](int, bool wrap) {
+             if (!wrap || !in_adventure()) return;
+             refill_consumables();
+             refill_tick = armGetSystemTick();
+         }, true},
         {"Inventory", "Melons", "Health containers.",
          [] { return std::to_string(nx::ram::u8(MELONS)); },
          [](int direction, bool wrap) { nx::ram::set_u8(MELONS, static_cast<uint8_t>(stepped(nx::ram::u8(MELONS), direction, wrap, 1, 1, 3))); }},
@@ -196,9 +312,9 @@ namespace {
          }},
 
         {"Interpolation", "Frames With an In-Between Image",
-         "At 60 fps, the share of the game's frames that got an in-between image over the last second. Camera cuts "
-         "and loading screens get none.",
-         [] { return nx::interpolated_60() ? text("%.0f%%", interp_share) : std::string("60 fps off"); }, nullptr},
+         "Above 30 fps, the share of the game's frames that got an in-between image over the last second: the chosen "
+         "rate's share at most (all at 60). Camera cuts, loading screens and frames too slow to draw twice get none.",
+         [] { return nx::interpolating() ? text("%.0f%%", interp_share) : std::string("30 fps"); }, nullptr},
         {"Interpolation", "Camera Cuts", "Frames over the last second where the camera jumped, shown without an in-between image.",
          [] { return text("%.1f /s", interp_cuts); }, nullptr},
         {"Interpolation", "Unmatched Matrices",
@@ -210,6 +326,9 @@ namespace {
 
 int nx::dev::count() { return static_cast<int>(sizeof(TOOLS) / sizeof(TOOLS[0])); }
 const nx::dev::Tool& nx::dev::tool(int index) { return TOOLS[index]; }
+
+bool nx::dev::overlay_shown() { return overlay; }
+std::string nx::dev::overlay_text() { return map_text() + "    " + position_text(); }
 
 void nx::dev::request_warp(int map, int exit) {
     pending_warp = map << 8 | exit;

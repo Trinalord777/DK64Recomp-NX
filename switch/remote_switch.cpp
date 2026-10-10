@@ -25,6 +25,7 @@
 #include <switch.h>
 
 #include "nx_dev_tools.h"
+#include "nx_settings.h"
 #include "nx_pad.h"
 
 std::string dk64nx_run_experiments();
@@ -399,6 +400,19 @@ namespace {
             return out[0] ? "OK " + std::string(out) + "\n" : "ERR no interpolated frame within 1 s\n";
         }
         if (command == "clocks") return "OK " + nx::dev::read_clocks() + "\n";
+        if (command == "set") {
+            // An NX Options setting by its nx_options.txt key, as the menu would (not saved until the menu closes).
+            std::string key; int value = 0;
+            if (!(in >> key >> value)) return "ERR usage: set frame_rate_fps 60\n";
+            for (int i = 0; i < static_cast<int>(nx::Setting::Count); i++) {
+                const auto setting = static_cast<nx::Setting>(i);
+                if (key != nx::info(setting).key) continue;
+                const int previous = nx::get(setting);
+                nx::set(setting, value);
+                return "OK previous=" + std::to_string(previous) + " now=" + std::to_string(nx::get(setting)) + "\n";
+            }
+            return "ERR unknown setting\n";
+        }
         if (command == "warp") {
             int map = 0, exit = 0;
             if (!(in >> map) || map < 0 || map > 0xFF) return "ERR usage: warp <map> [exit]\n";

@@ -269,7 +269,7 @@ m64p_error nx_VidExt_GL_SwapBuffers(void) {
     // in game). DK64's pause and transitions look the same without it. At 30 fps it stays as it was.
     static bool fast = false;
     static int applied_interval = -1;
-    const bool wants_fast = nx::interpolated_60();
+    const bool wants_fast = nx::interpolating();
     if (wants_fast != fast) {
         dk64nx_gliden64_set("copy", wants_fast ? 0 : 2);  // 2: GLideN64's default, ctDoubleBuffer
         fast = wants_fast;
@@ -356,6 +356,8 @@ void dk64nx_seed_gliden64_config() {
     // 16 present intervals of 25-31 ms in 4 s, against none without it.
     set_param(gliden, "ThreadedVideo", bool_param(false), false);
     set_param(gliden, "EnableLOD", bool_param(nx::at_startup(nx::Setting::TextureLod) == 1), false);
+    // NX Options' Texture Filter: 0 Standard (GLideN64's bilinearMode 1), 1 N64 3-point (0). Compiled into the shaders.
+    set_param(gliden, "bilinearMode", bool_param(nx::at_startup(nx::Setting::TextureFilter) == 0), false);
     set_param(gliden, "txHiresEnable", bool_param(false), false);
     set_param(gliden, "ShowFPS", bool_param(false), false);
     // Depth copy to RDRAM defaults to a software depth render on the CPU every frame; DK64 does

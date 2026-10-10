@@ -13,6 +13,7 @@ namespace nx::dev {
         const char* description;
         std::string (*value)();
         void (*change)(int direction, bool wrap);  // nullptr: a readout. wrap: A rather than Left/Right
+        bool button = false;  // an action run by A, value() being the button's text
     };
 
     int count();
@@ -21,6 +22,9 @@ namespace nx::dev {
     void update(uint64_t now_ms);
     // "CPU 1020, GPU 768, RAM 1600 MHz", read from the console now (a few IPC calls).
     std::string read_clocks();
+    // Dev Tools > Game > Map & Position Overlay, after the Paper Mario port's Value Viewer: on, and its text.
+    bool overlay_shown();
+    std::string overlay_text();
     // Warp To any map and exit, taken by the game thread at its next frame (dev harness warp command).
     void request_warp(int map, int exit);
 }

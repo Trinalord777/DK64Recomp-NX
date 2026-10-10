@@ -44,7 +44,7 @@ bool dk64nx_front_buffer_redrawn(uint32_t origin);
 extern "C" void dk64nx_interp_frame_begin();
 extern "C" void dk64nx_rt64ex_save_state();
 extern "C" void dk64nx_rt64ex_restore_state();
-extern "C" bool dk64nx_interp_begin_second_pass(uint32_t first_pass_us);
+extern "C" bool dk64nx_interp_begin_second_pass(uint32_t first_pass_us, bool wanted);
 extern "C" void dk64nx_interp_end_second_pass();
 extern "C" bool dk64nx_interp_present_in_between(uint32_t origin);
 extern "C" void dk64nx_interp_present_done();
@@ -75,6 +75,16 @@ namespace {
     unsigned int dpc_start_reg, dpc_end_reg, dpc_current_reg, dpc_status_reg;
     unsigned int dpc_clock_reg, dpc_bufbusy_reg, dpc_pipebusy_reg, dpc_tmem_reg;
     const unsigned int rdram_size = recomp::mem_size;
+
+    // Frame Rate between 30 and 60: an in-between image for (rate - 30) of every 30 frames, spread evenly (a
+    // Bresenham accumulator), so 45 fps draws one every other frame and 60 every frame.
+    bool in_between_due() {
+        static int accumulator = 0;
+        accumulator += nx::target_fps() - 30;
+        if (accumulator < 30) return false;
+        accumulator -= 30;
+        return true;
+    }
 
     // ultramodern signals SP/DP completion itself once send_dl returns.
     void check_interrupts() {}
@@ -195,8 +205,9 @@ namespace {
             DK64NX_TIME(2, start);
             dk64nx_pass1_us = static_cast<uint32_t>(armTicksToNs(second - start) / 1000);
             dk64nx_pass2_us = 0;
-            // 60 fps: the same display list again, with matrices halfway from the previous frame (gliden64_rt64ex.cpp).
-            const bool second_pass = nx::interpolated_60() && dk64nx_interp_begin_second_pass(dk64nx_pass1_us);
+            // Above 30 fps: the same display list again, with matrices halfway from the previous frame
+            // (gliden64_rt64ex.cpp), on the frames the chosen rate wants an in-between image for.
+            const bool second_pass = nx::interpolating() && dk64nx_interp_begin_second_pass(dk64nx_pass1_us, in_between_due());
             DK64NX_DL_BUFFER(dl_index, second_pass);
             dk64nx_dl_us_ring[dl_index % 512] = dk64nx_pass1_us;
             if (second_pass) {

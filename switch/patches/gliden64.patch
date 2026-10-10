@@ -170,7 +170,7 @@ index ff828ca..513c31d 100644
  		// Semaphore (POSIX, Linux)
  		//---------------------------------------------------------
 diff --git a/src/GraphicsDrawer.cpp b/src/GraphicsDrawer.cpp
-index 9f7796f..552aa08 100644
+index 9f7796f..9cdf532 100644
 --- a/src/GraphicsDrawer.cpp
 +++ b/src/GraphicsDrawer.cpp
 @@ -216,7 +216,7 @@ void GraphicsDrawer::updateScissor(FrameBuffer * _pBuffer) const
@@ -182,7 +182,45 @@ index 9f7796f..552aa08 100644
  		_adjustScissorX(SX0, SX1, wnd.getAdjustScale());
  
  	gfxContext.setScissor(roundup(SX0, scaleX), roundup(SY0, scaleY),
-@@ -1165,13 +1165,12 @@ void GraphicsDrawer::drawRect(int _ulx, int _uly, int _lrx, int _lry)
+@@ -846,6 +846,19 @@ void GraphicsDrawer::_prepareDrawTriangle(DrawingState _drawingState)
+ 	m_modifyVertices = 0;
+ }
+ 
++// renderTriangles walks every triangle on the CPU only to find how far down the frame buffer was drawn
++// (setBufferChanged grows the buffer's height with it) and, with a software depth copy, to rasterise depth. A main
++// buffer's height is clamped to the VI height and never shrinks, so once it is there the walk changes nothing.
++bool GraphicsDrawer::_maxYKnown() const
++{
++	if (!g_dk64nxSkipKnownMaxY)
++		return false;
++	if (config.frameBufferEmulation.copyDepthToRDRAM == Config::cdSoftwareRender && gDP.otherMode.depthUpdate != 0)
++		return false;
++	const FrameBuffer * pCurrent = frameBufferList().getCurrent();
++	return pCurrent != nullptr && pCurrent->m_isMainBuffer && pCurrent->m_height >= VI.height;
++}
++
+ bool GraphicsDrawer::_canDraw() const
+ {
+ 	return config.frameBufferEmulation.enable == 0 || frameBufferList().getCurrent() != nullptr;
+@@ -877,7 +890,7 @@ void GraphicsDrawer::drawTriangles()
+ 			maxY = renderAndDrawTriangles(triangles.vertices.data(), triangles.elements.data(), triangles.num, m_bFlatColors, m_statistics);
+ 		} else {
+ 			gfxContext.drawTriangles(triParams);
+-			maxY = renderTriangles(triangles.vertices.data(), triangles.elements.data(), triangles.num);
++			maxY = _maxYKnown() ? 0.0f : renderTriangles(triangles.vertices.data(), triangles.elements.data(), triangles.num);
+ 		}
+ 		frameBufferList().setBufferChanged(maxY);
+ 		if (config.frameBufferEmulation.copyDepthToRDRAM == Config::cdSoftwareRender &&
+@@ -975,7 +988,7 @@ void GraphicsDrawer::drawDMATriangles(u32 _numVtx)
+ 		}
+ 		else {
+ 			gfxContext.drawTriangles(triParams);
+-			maxY = renderTriangles(m_dmaVertices.data(), nullptr, _numVtx);
++			maxY = _maxYKnown() ? 0.0f : renderTriangles(m_dmaVertices.data(), nullptr, _numVtx);
+ 		}
+ 		frameBufferList().setBufferChanged(maxY);
+ 		if (config.frameBufferEmulation.copyDepthToRDRAM == Config::cdSoftwareRender &&
+@@ -1165,13 +1178,12 @@ void GraphicsDrawer::drawRect(int _ulx, int _uly, int _lrx, int _lry)
  	m_rect[3].bc1 = 1.0f;
  
  	DisplayWindow & wnd = dwnd();
@@ -202,7 +240,7 @@ index 9f7796f..552aa08 100644
  	}
  
  	Context::DrawRectParameters rectParams;
-@@ -1505,14 +1504,13 @@ void GraphicsDrawer::drawTexturedRect(const TexturedRectParams & _params)
+@@ -1505,14 +1517,13 @@ void GraphicsDrawer::drawTexturedRect(const TexturedRectParams & _params)
  
  	if (wnd.isAdjustScreen() && !bUseFbTexture &&
  		(_params.forceAjustScale ||
@@ -223,6 +261,18 @@ index 9f7796f..552aa08 100644
  	}
  
  	m_rect[0].bc0 = 0.0f;
+diff --git a/src/GraphicsDrawer.h b/src/GraphicsDrawer.h
+index 6da9424..4b3cb8e 100644
+--- a/src/GraphicsDrawer.h
++++ b/src/GraphicsDrawer.h
+@@ -213,6 +213,7 @@ private:
+ 	void _updateStates(DrawingState _drawingState) const;
+ 	void _prepareDrawTriangle(DrawingState _drawingState);
+ 	bool _canDraw() const;
++	bool _maxYKnown() const;
+ 	void _drawThickLine(u32 _v0, u32 _v1, float _width, u32 _flag);
+ 
+ 	void _drawOSD(const char *_pText, float _x, float & _y);
 diff --git a/src/RSP.cpp b/src/RSP.cpp
 index b66c782..b159fcc 100644
 --- a/src/RSP.cpp
@@ -236,10 +286,10 @@ index b66c782..b159fcc 100644
  		RSP_CheckDLCounter();
  	}
 diff --git a/src/RSP.h b/src/RSP.h
-index bf3ba27..2c6b07d 100644
+index bf3ba27..1ea2436 100644
 --- a/src/RSP.h
 +++ b/src/RSP.h
-@@ -22,7 +22,25 @@ extern RSPInfo RSP;
+@@ -22,7 +22,28 @@ extern RSPInfo RSP;
  extern u32 DepthClearColor;
  extern u32 rectDepthBufferCopyFrame;
  
@@ -263,6 +313,9 @@ index bf3ba27..2c6b07d 100644
 +void RT64EX_OnCommand(u32 w0, u32 w1);
 +// A culling or branch decision taken on transformed vertices (G_CULLDL, G_BRANCH_Z/W): returns the one to follow.
 +bool RT64EX_OnDecision(bool taken);
++// Skip the software pass that only measures how far down triangles reach once the main frame buffer counts as drawn
++// to its full height (GraphicsDrawer.cpp); dev harness: gl maxyskip 0|1.
++extern bool g_dk64nxSkipKnownMaxY;
  
  void RSP_Init();
  void RSP_ProcessDList();

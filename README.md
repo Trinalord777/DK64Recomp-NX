@@ -82,27 +82,33 @@ Press **− and +** together during the game to open **NX Options**.
 
 # Settings
 
-**NX Options** (− and + together) holds the PC version's options and more, in four tabs. **L**/**R** change tab,
-the D-Pad or the left stick moves, Left/Right or **A** change a value, **B** or − and + again close. The game does
-not react to the pad while the menu is open.
+**NX Options** (− and + together) holds the PC version's options and more, laid out as the HarbourMasters ports'
+menus: three tabs on top with the Help, Quit Game, Restart Game and Close buttons, the sections of the tab on the
+left, their settings on the right as checkboxes, choice lists and sliders. **L**/**R** change tab; Up/Down choose a
+section, **A** or Right open it; there Up/Down move, Left/Right change a value, **A** toggles or opens a choice
+list; **B** goes back, then closes; Up from the first section reaches the top buttons. The game does not react to
+the pad while the menu is open.
 
 | Tab | Contents |
 |---|---|
-| Settings | Display (resolution 2x or 3x, aspect ratio 16:9 or 4:3, texture LOD, show FPS), Performance (frame rate, clock profile), Audio (music and sound effects volume), Controls (face buttons), Camera (type, analog sensitivity, inversions) |
-| Enhancements | Gameplay (story skip, lightning flashes, cutscene borders, draw distance), performance overlay, Mods (on or off, and each mod's options), Cheats (the GameShark codes of `cheats.cht`) |
-| Dev Tools | Game (map, Kong, position), Warp (to DK Isles or any level), Inventory (coins, ammo, oranges, crystal coconuts, film, melons, health), Flags (Kong unlocks, any permanent flag), Interpolation statistics |
-| System | Restart Game (applies mods and display changes), Quit Game |
+| Settings | Display (resolution 2x or 3x, aspect ratio 16:9 or 4:3, texture LOD, texture filter, show FPS, performance overlay), Performance (frame rate 30 to 60, clock profile), Audio (master, music and sound effects volume), Controls (face buttons), Camera (type, analog sensitivity, inversions), Menu (orange or gray theme, opacity, size) |
+| Enhancements | Gameplay (story skip, lightning flashes, cutscene borders, draw distance), Mods (one group per mod: on or off, and its options), Cheats (the GameShark codes of `cheats.cht`, grouped by Kong) |
+| Dev Tools | Game (map, Kong, position, a map and position overlay, clocks), Warp (to DK Isles or any level), Inventory (coins, ammo, oranges, crystal coconuts, film, melons, health), Unlocks (give every Kong all its moves, refill the consumables), Flags (Kong unlocks, any permanent flag), Interpolation statistics |
 
 **Performance overlay** shows, top left, the frames per second, the time of each pass of a frame (two at 60 fps:
 the real image and the in-between one) and the screen refreshes per second that showed nothing new.
 
-**60 fps (interpolated)** is experimental: the game still runs at its original 30 fps, and an in-between image,
+**Frame rate** above 30 is experimental: the game still runs at its original 30 fps, and an in-between image,
 with every object halfway between two of its frames, is drawn and shown between them, as the PC version does with
 RT64. It adds one frame of latency. Camera cuts are not interpolated. Each image waits for the screen's refresh:
 measured walking in DK Isles at the stock 1020 MHz, 297 of 299 consecutive images move forward by exactly half a
 frame (in-between, then real), none goes back, and 1 refresh in 5 s repeats an image. A frame too heavy for two
 passes in time (first pass over 15 ms) shows without its in-between image, so the game never waits: in Creepy
-Castle at 1020 MHz, 2 frames out of 199 run late instead of 34-49, with 68% of the frames interpolated.
+Castle at 1020 MHz, 2 frames out of 199 run late instead of 34-49, with 68% of the frames interpolated. After
+such a frame the next half second stays at 30 fps too, so a view at the edge of the budget does not alternate 60
+and 30 fps frame by frame (running while turning the camera in Creepy Castle: 1-3 switches in 5 s instead of
+15-19). Between 35 and 55 fps, some frames get an in-between image (1 in 6 at 35, 1 in 2 at 45, 5 in 6 at 55, as
+measured); on a 60 Hz screen the others show twice, so 60 or 30 look steadier.
 
 **Texture LOD** is off by default: GLideN64's level of detail emulation tints the Kongs' eye whites pink and blurs
 their pupils, as reported in
@@ -120,10 +126,12 @@ on are remembered in `cheats_enabled.txt`. Back up `saves/` before playing with 
 **Clock profile** raises the clocks in handheld mode only, while the game is in the foreground:
 *Docked GPU in Handheld* is the console's official docked GPU profile (768 MHz); *Horizon OC Docked Clocks*
 applies the docked CPU, GPU and RAM clocks set in [Horizon OC](https://github.com/Horizon-OC/Horizon-OC), if it
-is installed. Both are released when you leave the game.
+is installed; *CPU Boost* asks Horizon OC for the CPU at 1785 MHz, docked and handheld. All are released when you
+leave the game.
 
-Changes apply immediately, except the aspect ratio, the resolution, texture LOD and mods, which apply the next
-time the game starts (System > Restart Game). They are saved to `sdmc:/switch/dk64recomp/nx_options.txt` when the menu closes. By default the game
+Changes apply immediately, except the aspect ratio, the resolution, texture LOD, the texture filter and mods,
+which apply the next time the game starts (the Restart Game button). They are saved to
+`sdmc:/switch/dk64recomp/nx_options.txt` when the menu closes. By default the game
 runs at its original 30 fps, in 16:9 with the HUD at the screen edges, at 960x720 (3x native), without cutscene
 borders.
 
