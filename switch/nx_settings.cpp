@@ -94,8 +94,9 @@ namespace {
          0, OFF_ON},
         {"Performance", "frame_mode", "Frame Rate Mode",
          "Above 30 fps. Interpolated: the game keeps its 30 steps per second and in-between images are drawn, as on PC. "
-         "True (experimental): the game itself runs up to the chosen rate, as DK64 does in Jetpac; what its engine does "
-         "not scale by the frame's length runs faster. The DK Rap and the intros stay at 30.",
+         "True (experimental): the game itself runs up to the chosen rate, as DK64 does in Jetpac. DK runs at the right "
+         "speed, but much of the game (animations, enemies, timers) runs faster than intended. The DK Rap and the intros "
+         "stay at 30.",
          0, {"Interpolated", "True (experimental)"}},
     };
 

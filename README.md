@@ -121,8 +121,9 @@ measured); on a 60 Hz screen the others show twice, so 60 or 30 look steadier.
 With **Frame Rate Mode** on *True (experimental)* the game itself runs up to the chosen rate, each frame moving the
 game by the screen refreshes it really took, as DK64 does in Jetpac. Touring the levels: 50-61 game frames per
 second at 1020 MHz where the game's own work allows it (31 in DK Isles), 61-63 at 1785 MHz. DK runs as fast as at
-30 fps (98.8 and 99.7 units/s) and answers the stick sooner; parts of the engine that do not scale with a frame's
-length run faster. The DK Rap and the intros stay at 30.
+30 fps (98.8 and 99.7 units/s) and answers the stick sooner, but much of the game (animations, enemies, timers)
+does not scale with a frame's length and runs faster than intended, so the game looks much faster: Interpolated is
+the mode to play with. The DK Rap and the intros stay at 30.
 
 **Texture LOD** is off by default: GLideN64's level of detail emulation tints the Kongs' eye whites pink and blurs
 their pupils, as reported in
