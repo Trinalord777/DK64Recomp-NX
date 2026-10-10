@@ -109,10 +109,13 @@ their pupils, as reported in
 [mupen64plus-libretro-nx#458](https://github.com/libretro/mupen64plus-libretro-nx/issues/458).
 
 **Cheats** come from `sdmc:/switch/dk64recomp/cheats.cht`, in libretro's format: copy
-[Donkey Kong 64 (U).cht](https://github.com/libretro/libretro-database/blob/master/cht/Nintendo%20-%20Nintendo%2064/Donkey%20Kong%2064%20(U).cht)
-from libretro-database there and rename it. Codes that change the game's data (ammo, health, bananas, coins)
-work; codes that patch the game's instructions do not, since the game runs as recompiled code, and the menu marks
-them Unsupported. The cheats left on are remembered in `cheats_enabled.txt`.
+[`switch/cheats/cheats.cht`](switch/cheats/cheats.cht) there. It is libretro-database's
+`Donkey Kong 64 (U).cht` corrected on the console: that file's Infinite Health also sets the melon count to 4,
+which the save stores in 2 bits, so a save made with it on leaves the file with 0 melons; four of its codes write
+the wrong place (DK's Galleon bananas, Tiny's Castle golden bananas, crystals) or swap ammo and oranges. Codes
+that change the game's data work; codes that patch the game's instructions change nothing, since the game runs as
+recompiled code, and the menu cannot tell them apart. Codes of other types show as Unsupported. The cheats left
+on are remembered in `cheats_enabled.txt`. Back up `saves/` before playing with cheats: the game saves on its own.
 
 **Clock profile** raises the clocks in handheld mode only, while the game is in the foreground:
 *Docked GPU in Handheld* is the console's official docked GPU profile (768 MHz); *Horizon OC Docked Clocks*
