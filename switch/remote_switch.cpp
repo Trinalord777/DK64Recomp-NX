@@ -319,6 +319,13 @@ namespace {
             // Real and in-between copies of the next interpolated frame (60 fps mode), back to back; ishotc waits for
             // a frame whose matrix count changed (and keeps its pairing report for pairdump).
             *binary_sent = true;
+            // A burst of 20 captures, two GPU read-backs and 5.5 MB each, ended in a console reboot (2162-0004):
+            // one capture a second at most.
+            static uint64_t last_capture_ms = 0;
+            if (const uint64_t since = now_ms() - last_capture_ms; last_capture_ms != 0 && since < 1000) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1000 - since));
+            }
+            last_capture_ms = now_ms();
             uint32_t width = 0, height = 0;
             const uint8_t* real = nullptr;
             const uint8_t* in_between = nullptr;

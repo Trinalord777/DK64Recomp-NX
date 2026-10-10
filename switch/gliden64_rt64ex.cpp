@@ -262,12 +262,20 @@ static f32 cut_translation = 5000.0f;
 // the game's 33.3 ms frame, or the game itself loses a frame (a 50-60 ms freeze); the second pass costs about as much
 // as the first. Measured in Creepy Castle at 1020 MHz, 3x, over 199 frames: no limit lost 34-49 frames, 17 ms lost 26
 // (75% with an in-between), 15 ms lost 2 (68%), 11-13 ms lost 2 (50%). Dev harness: gl pass2max <microseconds>.
+extern "C" unsigned long long dk64nx_ms_since_boot();  // main_switch.cpp
+
 static u32 pass2_max_us = 15000;
 
-// After a frame over that budget, the next ones get no in-between image either for this many frames (15: half a
-// second): a view at the edge of the budget otherwise alternates 60 and 30 fps frame by frame, which shows more
-// than a steady 30. A frame over the budget during the hold starts it again. Dev harness: gl hysteresis <frames>.
+// When frames go over that budget close together (two within hysteresis_window frames), the next ones get no
+// in-between image either for hysteresis_frames (15: half a second): a view at the edge of the budget otherwise
+// alternates 60 and 30 fps frame by frame, which shows more than a steady 30. A lone frame over it (a shader
+// compiled, an object appearing) costs only itself: in the DK TV demo, 6 lone frames held 80 others at 30 fps
+// when any frame over the budget started the hold. Running and turning the camera at once in Creepy Castle, where
+// most frames are over it, 2 runs of ~210 frames switched between 60 and 30 fps 4 and 1 times instead of 29 and 35
+// (an 8-frame hold: 2 and 1, but at 60 fps 8-17% of the time instead of 24-61%). Dev harness: gl hysteresis
+// <frames>, gl hystwindow <frames>.
 static u32 hysteresis_frames = 15;
+static u32 hysteresis_window = 8;
 
 // Dev harness experiment (gl lerpmask): which matrices the second pass interpolates. 1: paired by group ID,
 // 2: paired by rank and likeness, 4: projections. 0 makes the in-between image a plain second render of the frame.
@@ -324,6 +332,11 @@ extern "C" int dk64nx_gliden64_set(const char* name, int value) {
     if (strcmp(name, "hysteresis") == 0) {
         const int previous = static_cast<int>(hysteresis_frames);
         hysteresis_frames = static_cast<u32>(value);
+        return previous;
+    }
+    if (strcmp(name, "hystwindow") == 0) {
+        const int previous = static_cast<int>(hysteresis_window);
+        hysteresis_window = static_cast<u32>(value);
         return previous;
     }
     if (strcmp(name, "pass2max") == 0) {
@@ -461,6 +474,7 @@ namespace {
     FrameBuffer* in_between_shown = nullptr;
     u32 frames_begun = 0;
     u32 hold_until = 0;  // frames_begun at which the hysteresis hold ends
+    u32 last_over = 0;   // frames_begun of the last frame over the pass budget
     std::map<u32, u32> frame_in_buffer;  // by color buffer address, for the dev harness
 
     struct MatchStats {
@@ -841,7 +855,10 @@ extern "C" void dk64nx_interp_frame_begin() {
     command_hash = FNV_OFFSET;
     command_count = 0;
     camera_cut = false;
-    frames_begun++;
+    if (frames_begun++ == 0) {
+        // The boot's black screen: from here to the first frame presented is the renderer, before it the game.
+        std::printf("[DK64NX] step: first display list (%llu ms)\n", dk64nx_ms_since_boot());
+    }
     previous_by_group.clear();
     for (size_t i = 0; i < matrices_previous.size(); i++) {
         const LoadedMatrix& m = matrices_previous[i];
@@ -874,7 +891,12 @@ extern "C" bool dk64nx_interp_begin_second_pass(u32 first_pass_us, bool wanted) 
     const bool cut = camera_cut || jumped;
     const bool over = !cut && first_pass_us > pass2_max_us;
     if (cut || over) {
-        if (over) hold_until = frames_begun + hysteresis_frames;
+        if (over) {
+            if (last_over != 0 && frames_begun - last_over <= hysteresis_window) {
+                hold_until = frames_begun + hysteresis_frames;
+            }
+            last_over = frames_begun;
+        }
         std::lock_guard lock{match_mutex};
         (cut ? match_stats.camera_cuts : match_stats.over_budget)++;
     }

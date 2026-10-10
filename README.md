@@ -106,10 +106,10 @@ RT64. It adds one frame of latency. Camera cuts are not interpolated. Each image
 measured walking in DK Isles at the stock 1020 MHz, 297 of 299 consecutive images move forward by exactly half a
 frame (in-between, then real), none goes back, and 1 refresh in 5 s repeats an image. A frame too heavy for two
 passes in time (first pass over 15 ms) shows without its in-between image, so the game never waits: in Creepy
-Castle at 1020 MHz, 2 frames out of 199 run late instead of 34-49, with 68% of the frames interpolated. After
-such a frame the next half second stays at 30 fps too, so a view at the edge of the budget does not alternate 60
-and 30 fps frame by frame (running while turning the camera in Creepy Castle: 1-3 switches in 5 s instead of
-15-19). Between 35 and 55 fps, some frames get an in-between image (1 in 6 at 35, 1 in 2 at 45, 5 in 6 at 55, as
+Castle at 1020 MHz, 2 frames out of 199 run late instead of 34-49, with 68% of the frames interpolated. When two
+such frames come within 8 frames of each other, the next half second stays at 30 fps too, so a view at the edge of
+the budget does not alternate 60 and 30 fps frame by frame, while a lone heavy frame costs only itself (running
+and turning the camera at once in Creepy Castle, about 7 s: 1-4 switches between 60 and 30 instead of 29-35). Between 35 and 55 fps, some frames get an in-between image (1 in 6 at 35, 1 in 2 at 45, 5 in 6 at 55, as
 measured); on a 60 Hz screen the others show twice, so 60 or 30 look steadier.
 
 **Texture LOD** is off by default: GLideN64's level of detail emulation tints the Kongs' eye whites pink and blurs
