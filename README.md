@@ -6,7 +6,7 @@ around it: the renderer (GLideN64 instead of RT64), the OS layer and the threadi
 
 | Measured on hardware | |
 |---|---|
-| Frame rate | 30 fps, the game's original rate |
+| Frame rate | 30 fps, the game's original rate; 35-60 fps in NX Options, interpolated or true (experimental) |
 | Resolution | 960×720 (3× native), 16:9 widescreen with the HUD at the screen edges |
 | Audio | 48 kHz, in real time, no dropouts |
 | Saves | Yes |
@@ -100,17 +100,29 @@ the real image and the in-between one) and the screen refreshes per second that 
 viewer** draws the pad, bottom right, its buttons lit while pressed and its sticks where they point. **Gameplay
 timer** shows the file's play time, top right, the one the file select shows, while playing an adventure.
 
-**Frame rate** above 30 is experimental: the game still runs at its original 30 fps, and an in-between image,
-with every object halfway between two of its frames, is drawn and shown between them, as the PC version does with
-RT64. It adds one frame of latency. Camera cuts are not interpolated. Each image waits for the screen's refresh:
-measured walking in DK Isles at the stock 1020 MHz, 297 of 299 consecutive images move forward by exactly half a
-frame (in-between, then real), none goes back, and 1 refresh in 5 s repeats an image. A frame too heavy for two
-passes in time (first pass over 15 ms) shows without its in-between image, so the game never waits: in Creepy
-Castle at 1020 MHz, 2 frames out of 199 run late instead of 34-49, with 68% of the frames interpolated. When two
-such frames come within 8 frames of each other, the next half second stays at 30 fps too, so a view at the edge of
-the budget does not alternate 60 and 30 fps frame by frame, while a lone heavy frame costs only itself (running
-and turning the camera at once in Creepy Castle, about 7 s: 1-4 switches between 60 and 30 instead of 29-35). Between 35 and 55 fps, some frames get an in-between image (1 in 6 at 35, 1 in 2 at 45, 5 in 6 at 55, as
+**Frame rate** above 30 is experimental. With **Frame Rate Mode** on *Interpolated* (the default) the game still
+runs at its original 30 fps, and an in-between image, with every object halfway between two of its frames, is drawn
+and shown between them, as the PC version does with RT64. It adds one frame of latency. Camera cuts are not
+interpolated. Each image waits for the screen's refresh: measured walking in DK Isles at the stock 1020 MHz, 297 of
+299 consecutive images move forward by exactly half a frame (in-between, then real), none goes back, and 1 refresh
+in 5 s repeats an image. A frame too heavy for two passes in time shows without its in-between image, so the game
+never waits: the two passes, the second predicted from the last ones, must fit in 30 ms (in Creepy Castle at 1020
+MHz, a 15 ms limit on the first pass left 2 frames out of 199 late instead of 34-49, with 68% interpolated). A
+first pass slowed by the textures and shaders loaded the first time a room is seen (18-72 ms measured) is followed
+by a second pass at its usual cost (13 ms at most), so that frame keeps its in-between image: in the same Galleon
+visit at 1428 MHz, no frame held at 30 fps instead of 27. When two frames over the budget come within 8 frames of
+each other, the next half second stays at 30 fps too, so a view at the edge of the budget does not alternate 60
+and 30 fps frame by frame (running and turning the camera at once in Creepy Castle, about 7 s: 1-4 switches
+between 60 and 30 instead of 29-35). When the two passes outlast a screen refresh, the image due at that refresh
+is presented between them rather than after both: two images presented within one refresh had hidden the first.
+Between 35 and 55 fps, some frames get an in-between image (1 in 6 at 35, 1 in 2 at 45, 5 in 6 at 55, as
 measured); on a 60 Hz screen the others show twice, so 60 or 30 look steadier.
+
+With **Frame Rate Mode** on *True (experimental)* the game itself runs up to the chosen rate, each frame moving the
+game by the screen refreshes it really took, as DK64 does in Jetpac. Touring the levels: 50-61 game frames per
+second at 1020 MHz where the game's own work allows it (31 in DK Isles), 61-63 at 1785 MHz. DK runs as fast as at
+30 fps (98.8 and 99.7 units/s) and answers the stick sooner; parts of the engine that do not scale with a frame's
+length run faster. The DK Rap and the intros stay at 30.
 
 **Texture LOD** is off by default: GLideN64's level of detail emulation tints the Kongs' eye whites pink and blurs
 their pupils, as reported in
@@ -129,7 +141,12 @@ on are remembered in `cheats_enabled.txt`. Back up `saves/` before playing with 
 *Docked GPU in Handheld* is the console's official docked GPU profile (768 MHz); *Horizon OC Docked Clocks*
 applies the docked CPU, GPU and RAM clocks set in [Horizon OC](https://github.com/Horizon-OC/Horizon-OC), if it
 is installed; *CPU Boost* asks Horizon OC for the CPU at 1785 MHz, docked and handheld. All are released when you
-leave the game.
+leave the game. Both Horizon OC profiles turn its CPU governor off for the game: with the governor on, the CPU
+stays at the stock 1020 MHz whatever the profile asks.
+
+At 60 fps the CPU clock matters most: the two passes of a frame are CPU-bound. In the same DK Isles view they take
+9.35 + 8.79 ms at 1020 MHz (over the 16.7 ms of a screen refresh), 6.82 + 5.90 ms at 1581 MHz and 6.30 + 5.33 ms
+at 1785 MHz (CPU Boost).
 
 Changes apply immediately, except the aspect ratio, the resolution, texture LOD, the texture filter and mods,
 which apply the next time the game starts (the Restart Game button). They are saved to
