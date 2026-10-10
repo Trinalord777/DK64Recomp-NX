@@ -236,10 +236,10 @@ index b66c782..b159fcc 100644
  		RSP_CheckDLCounter();
  	}
 diff --git a/src/RSP.h b/src/RSP.h
-index bf3ba27..ef253ba 100644
+index bf3ba27..2c6b07d 100644
 --- a/src/RSP.h
 +++ b/src/RSP.h
-@@ -22,7 +22,23 @@ extern RSPInfo RSP;
+@@ -22,7 +22,25 @@ extern RSPInfo RSP;
  extern u32 DepthClearColor;
  extern u32 rectDepthBufferCopyFrame;
  
@@ -261,6 +261,8 @@ index bf3ba27..ef253ba 100644
 +void RT64EX_OnMatrix(u32 address, u8 param, f32 mtx[4][4]);
 +void RT64EX_OnVertices(u32 address, u32 size);
 +void RT64EX_OnCommand(u32 w0, u32 w1);
++// A culling or branch decision taken on transformed vertices (G_CULLDL, G_BRANCH_Z/W): returns the one to follow.
++bool RT64EX_OnDecision(bool taken);
  
  void RSP_Init();
  void RSP_ProcessDList();
@@ -278,7 +280,7 @@ index a2805c4..44881c1 100644
  	gDP.scissor.xh = xh;
  	gDP.scissor.yh = yh;
 diff --git a/src/gSP.cpp b/src/gSP.cpp
-index ab5ada9..382cb47 100644
+index ab5ada9..22e6306 100644
 --- a/src/gSP.cpp
 +++ b/src/gSP.cpp
 @@ -176,6 +176,8 @@ void gSPMatrix( u32 matrix, u8 param )
@@ -299,6 +301,33 @@ index ab5ada9..382cb47 100644
  	if ((gSP.geometryMode & G_LIGHTING) != 0) {
  
  		if ((gSP.changed & CHANGED_LIGHT) != 0)
+@@ -1752,7 +1756,7 @@ void gSPBranchLessZ(u32 branchdl, u32 vtx, u32 zval)
+ 
+ 	SPVertex & v = dwnd().getDrawer().getVertex(vtx);
+ 	const u32 zTest = u32((v.z / v.w) * 1023.0f);
+-	if (zTest > 0x03FF || zTest <= zval)
++	if (RT64EX_OnDecision(zTest > 0x03FF || zTest <= zval))
+ 		RSP.PC[RSP.PCi] = address;
+ 
+ 	DebugMsg(DEBUG_NORMAL, "gSPBranchLessZ( 0x%08X, %i, %i );\n", branchdl, vtx, zval );
+@@ -1769,7 +1773,7 @@ void gSPBranchLessW( u32 branchdl, u32 vtx, u32 wval )
+ 	}
+ 
+ 	SPVertex & v = dwnd().getDrawer().getVertex(vtx);
+-	if (v.w < (float)wval)
++	if (RT64EX_OnDecision(v.w < (float)wval))
+ 		RSP.PC[RSP.PCi] = address;
+ 
+ 	DebugMsg(DEBUG_NORMAL, "gSPBranchLessZ( 0x%08X, %i, %i );\n", branchdl, vtx, wval);
+@@ -1907,7 +1911,7 @@ bool gSPCullVertices( u32 v0, u32 vn )
+ 
+ void gSPCullDisplayList( u32 v0, u32 vn )
+ {
+-	if (gSPCullVertices( v0, vn )) {
++	if (RT64EX_OnDecision(gSPCullVertices( v0, vn ))) {
+ 		if (RSP.PCi > 0)
+ 			RSP.PCi--;
+ 		else {
 diff --git a/src/uCodes/F3DEX2.cpp b/src/uCodes/F3DEX2.cpp
 index dc98298..b30ee8b 100644
 --- a/src/uCodes/F3DEX2.cpp

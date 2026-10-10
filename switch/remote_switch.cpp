@@ -46,7 +46,7 @@ extern "C" int dk64nx_interp_stats(char* out, int size);
 extern "C" void dk64nx_interp_request_projections();
 extern "C" int dk64nx_interp_projections(char* out, int size);
 extern "C" bool dk64nx_interp_capture(uint32_t* width, uint32_t* height, const uint8_t** real, const uint8_t** in_between,
-                                      bool on_change);
+                                      bool on_change, char* note, size_t note_size);
 extern "C" int dk64nx_interp_pair_dump(char* out, int size);
 
 // Graphics thread: the image of the present under way, in half frames (render_gliden64.cpp).
@@ -321,14 +321,16 @@ namespace {
             uint32_t width = 0, height = 0;
             const uint8_t* real = nullptr;
             const uint8_t* in_between = nullptr;
-            if (!dk64nx_interp_capture(&width, &height, &real, &in_between, command == "ishotc")) {
-                const char* error = "ERR no interpolated frame in time\n";
-                send_all(fd, error, std::strlen(error));
+            char note[96];
+            if (!dk64nx_interp_capture(&width, &height, &real, &in_between, command == "ishotc", note, sizeof(note))) {
+                char error[128];
+                const int length = std::snprintf(error, sizeof(error), "ERR %s\n", note);
+                send_all(fd, error, length);
                 return "";
             }
             const size_t size = size_t(width) * height * 4;
-            char header[64];
-            const int length = std::snprintf(header, sizeof(header), "OK %u %u %zu\n", width, height, size);
+            char header[160];
+            const int length = std::snprintf(header, sizeof(header), "OK %u %u %zu %s\n", width, height, size, note);
             send_all(fd, header, length) && send_all(fd, real, size) && send_all(fd, in_between, size);
             return "";
         }
@@ -366,9 +368,10 @@ namespace {
         if (command == "cpu") return cpu_load();
         if (command == "timing") return timing_report();
         if (command == "mtx") {
-            char out[512];
-            dk64nx_interp_stats(out, sizeof(out));
-            return std::string("OK ") + out + "\n";
+            // The opcode histograms make the line long: up to 256 entries each.
+            std::vector<char> out(8192);
+            dk64nx_interp_stats(out.data(), static_cast<int>(out.size()));
+            return std::string("OK ") + out.data() + "\n";
         }
         if (command == "gl") {
             std::string name; int value = 0;

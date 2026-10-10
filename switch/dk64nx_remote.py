@@ -84,10 +84,10 @@ def main() -> int:
             if not header.startswith("OK"):
                 print(header, file=sys.stderr)
                 return 1
-            _, width, height, size = header.split()
+            _, width, height, size, *note = header.split()
             for name in ("real", "between"):
                 write_png(Path(f"{prefix}_{name}.png"), int(width), int(height), read_exact(sock, int(size)))
-            print(f"saved {prefix}_real.png and {prefix}_between.png ({width}x{height})")
+            print(f"saved {prefix}_real.png and {prefix}_between.png ({width}x{height}) {' '.join(note)}")
             return 0
         if args.command[0] == "shot":
             out = Path(args.command[1] if len(args.command) > 1 else "shot.png")

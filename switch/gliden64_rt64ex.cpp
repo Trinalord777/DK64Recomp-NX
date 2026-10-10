@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <cstdio>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -267,6 +268,14 @@ static u32 pass2_max_us = 15000;
 // 2: paired by rank and likeness, 4: projections. 0 makes the in-between image a plain second render of the frame.
 static u32 lerp_mask = 7;
 
+// The second pass transforms vertices with in-between matrices, so a sub-list near the edge of the view or a depth
+// branch could go the other way than in the first pass (G_CULLDL, G_BRANCH_Z/W): the command stream then differs from
+// the first pass and the in-between image was dropped as if the game had edited the list (2-14 frames in 230 on the
+// big maps, measured 2026-10-10, 0 with the replay). The second pass follows the first pass's decisions instead, so it
+// draws what the real frame draws. Trade-off: something leaving the view that the real frame culls is already gone
+// from the in-between, a sliver at the screen edge 8 ms early, instead of a repeated image. gl cullreplay 0|1.
+static bool replay_decisions = true;
+
 // Graphics thread: GLideN64 saves its shaders storage (the combiners seen so far, compiled again at the next start) only
 // at shutdown, which the game closed from the HOME menu never reaches: every session then compiled each new effect in
 // the middle of play, a freeze of up to 122 ms measured. The swap hook calls this every few seconds.
@@ -288,6 +297,11 @@ extern "C" int dk64nx_gliden64_set(const char* name, int value) {
     if (strcmp(name, "lerpmask") == 0) {
         const int previous = static_cast<int>(lerp_mask);
         lerp_mask = static_cast<u32>(value);
+        return previous;
+    }
+    if (strcmp(name, "cullreplay") == 0) {
+        const int previous = replay_decisions ? 1 : 0;
+        replay_decisions = value != 0;
         return previous;
     }
     if (strcmp(name, "pass2max") == 0) {
@@ -391,6 +405,17 @@ namespace {
     u64 command_count = 0;
     u64 first_pass_command_hash = 0;
     u64 first_pass_command_count = 0;
+    // Dev harness: the first pass's commands, to name the first one the second pass found changed (mtx diff_ops).
+    std::vector<std::pair<u32, u32>> first_pass_commands;
+    size_t command_rank = 0;
+    u32 frame_command_diffs = 0;
+    u8 frame_first_diff_op = 0;
+    u8 last_common_op = 0;        // the last command both passes executed alike, before the first change
+    u8 frame_last_common_op = 0;
+    // The culling and branch decisions of the first pass (RT64EX_OnDecision), replayed by the second.
+    std::vector<bool> first_pass_decisions;
+    size_t decision_rank = 0;
+    bool frame_decision_flipped = false;
     std::vector<VertexLoad> vertices_current;
     size_t vertex_rank = 0;
     // Dev harness (ishotc / pairdump): how each matrix of the second pass was paired: method and twin rank.
@@ -436,6 +461,10 @@ namespace {
         u64 pass2_diverged = 0;       // in-between images dropped: the second pass loaded other matrices or vertices
         u64 vertices_diverged = 0;    // ... of which the vertices differed
         u64 commands_diverged = 0;    // ... of which the commands differed
+        u64 diff_ops[256] = {};       // ... by opcode of the first command found changed
+        u64 common_ops[256] = {};     // ... by opcode of the last command both passes executed alike before it
+        u64 command_diffs = 0;        // ... commands found changed in them
+        u64 decision_flips = 0;       // second passes whose own culling or branch decision differed from the first's
         u64 projection_rotation[EDGE_COUNT + 1] = {};
         u64 projection_translation[EDGE_COUNT + 1] = {};
     } match_stats;
@@ -653,6 +682,32 @@ static ptrdiff_t id_twin(const LoadedMatrix& now) {
 void RT64EX_OnCommand(u32 w0, u32 w1) {
     command_hash = (command_hash ^ ((static_cast<u64>(w0) << 32) | w1)) * FNV_PRIME;
     command_count++;
+    if (!substituting) {
+        first_pass_commands.emplace_back(w0, w1);
+        return;
+    }
+    const size_t rank = command_rank++;
+    const bool known = rank < first_pass_commands.size();
+    if (known && first_pass_commands[rank] == std::make_pair(w0, w1)) {
+        if (frame_command_diffs == 0) last_common_op = static_cast<u8>(w0 >> 24);
+        return;
+    }
+    if (frame_command_diffs++ == 0) {
+        frame_first_diff_op = static_cast<u8>((known ? first_pass_commands[rank].first : w0) >> 24);
+        frame_last_common_op = last_common_op;
+    }
+}
+
+bool RT64EX_OnDecision(bool taken) {
+    if (!substituting) {
+        first_pass_decisions.push_back(taken);
+        return taken;
+    }
+    const size_t rank = decision_rank++;
+    if (rank >= first_pass_decisions.size()) return taken;
+    const bool first = first_pass_decisions[rank];
+    frame_decision_flipped = frame_decision_flipped || first != taken;
+    return replay_decisions ? first : taken;
 }
 
 void RT64EX_OnVertices(u32 address, u32 size) {
@@ -757,6 +812,8 @@ extern "C" void dk64nx_interp_frame_begin() {
     }
     matrices_current.clear();
     vertices_current.clear();
+    first_pass_commands.clear();
+    first_pass_decisions.clear();
     command_hash = FNV_OFFSET;
     command_count = 0;
     camera_cut = false;
@@ -807,6 +864,11 @@ extern "C" bool dk64nx_interp_begin_second_pass(u32 first_pass_us) {
     first_pass_command_count = command_count;
     command_hash = FNV_OFFSET;
     command_count = 0;
+    command_rank = 0;
+    frame_command_diffs = 0;
+    last_common_op = 0;
+    decision_rank = 0;
+    frame_decision_flipped = false;
     vertex_rank = 0;
     vertices_diverged_frame = false;
     pair_log.clear();
@@ -859,6 +921,8 @@ namespace {
     std::vector<u8> capture_pixels[2];
     u32 capture_width = 0;
     u32 capture_height = 0;
+    GLint capture_pack_buffer = 0;     // pixel pack buffer found bound at the capture
+    GLenum capture_error = GL_NO_ERROR;
 
     void capture_copies(FrameBuffer* buffer) {
         std::lock_guard lock{capture_mutex};
@@ -867,11 +931,20 @@ namespace {
         dump_pairs();
         capture_width = buffer->m_pTexture->width;
         capture_height = buffer->m_pTexture->height;
+        // With a pixel pack buffer bound (GLideN64's color buffer readback), glReadPixels would write into it and
+        // leave capture_pixels as they were: unbind it for the read, then bind the same one back (GLideN64 caches it).
+        glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &capture_pack_buffer);
+        if (capture_pack_buffer != 0) glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+        // glGetError is GLideN64's wrapper, a constant GL_NO_ERROR without GL_DEBUG: ask the driver itself.
+        while (ptrGetError() != GL_NO_ERROR) {}
+        capture_error = GL_NO_ERROR;
         for (u32 slot = 0; slot < 2; slot++) {
             capture_pixels[slot].resize(size_t(capture_width) * capture_height * 4);
             gfxContext.bindFramebuffer(graphics::bufferTarget::READ_FRAMEBUFFER, buffer->m_interpFBO[slot]);
             glReadPixels(0, 0, capture_width, capture_height, GL_RGBA, GL_UNSIGNED_BYTE, capture_pixels[slot].data());
+            if (capture_error == GL_NO_ERROR) capture_error = ptrGetError();
         }
+        if (capture_pack_buffer != 0) glBindBuffer(GL_PIXEL_PACK_BUFFER, capture_pack_buffer);
         gfxContext.bindFramebuffer(graphics::bufferTarget::READ_FRAMEBUFFER, graphics::ObjectHandle::defaultFramebuffer);
         capture_wanted = false;
         capture_ready = true;
@@ -879,15 +952,20 @@ namespace {
     }
 }
 
-extern "C" bool dk64nx_interp_capture(u32* width, u32* height, const u8** real, const u8** in_between, bool on_change) {
+// note: what the read found (the pack buffer it unbound, the GL error), also filled on failure.
+extern "C" bool dk64nx_interp_capture(u32* width, u32* height, const u8** real, const u8** in_between, bool on_change,
+                                      char* note, size_t note_size) {
     std::unique_lock lock{capture_mutex};
     capture_ready = false;
     capture_wanted = true;
     capture_on_change = on_change;
     if (!capture_cv.wait_for(lock, std::chrono::seconds(on_change ? 8 : 2), [] { return capture_ready; })) {
         capture_wanted = false;
+        std::snprintf(note, note_size, "no interpolated frame in time");
         return false;
     }
+    std::snprintf(note, note_size, "pack_buffer=%d gl_error=0x%X", capture_pack_buffer, capture_error);
+    if (capture_error != GL_NO_ERROR) return false;
     *width = capture_width;
     *height = capture_height;
     *real = capture_pixels[0].data();
@@ -903,11 +981,25 @@ extern "C" void dk64nx_interp_end_second_pass() {
         buffer->interpCopy(0, false);  // the real one back
         const bool vertices_differ = vertex_rank != vertices_current.size();
         const bool commands_differ = command_hash != first_pass_command_hash || command_count != first_pass_command_count;
+        if (frame_decision_flipped) {
+            std::lock_guard lock{match_mutex};
+            match_stats.decision_flips++;
+        }
         if (pass2_diverged || vertices_differ || commands_differ || substitute_rank != matrices_current.size()) {
             std::lock_guard lock{match_mutex};
             match_stats.pass2_diverged++;
             match_stats.vertices_diverged += vertices_differ || vertices_diverged_frame;
             match_stats.commands_diverged += commands_differ;
+            if (commands_differ && frame_command_diffs == 0 && command_rank < first_pass_commands.size()) {
+                frame_command_diffs = 1;  // the second pass stopped early, every command it ran equal
+                frame_first_diff_op = static_cast<u8>(first_pass_commands[command_rank].first >> 24);
+                frame_last_common_op = last_common_op;
+            }
+            if (commands_differ && frame_command_diffs > 0) {
+                match_stats.diff_ops[frame_first_diff_op]++;
+                match_stats.common_ops[frame_last_common_op]++;
+                match_stats.command_diffs += frame_command_diffs;
+            }
             return;
         }
         in_between[buffer->m_startAddress] = {buffer, frameBufferList().findBuffer(*REG.VI_ORIGIN) == buffer};
@@ -984,12 +1076,26 @@ extern "C" int dk64nx_interp_stats(char* out, int size) {
              (unsigned long long)s.projection_translation[0], (unsigned long long)s.projection_translation[1],
              (unsigned long long)s.projection_translation[2], (unsigned long long)s.projection_translation[3],
              (unsigned long long)s.projection_translation[4], (unsigned long long)s.projection_translation[5]);
-    return snprintf(out, size, "frames=%llu interpolated=%llu cuts=%llu over_budget=%llu mostly_unmatched=%llu camera_unmatched=%llu id_paired=%llu id_missing=%llu ignored=%llu rank_disagree=%llu identical_preferred=%llu pass2_diverged=%llu vertices_diverged=%llu commands_diverged=%llu unmatched/frame=%.1f matrices/frame=%.0f equal=%.1f%% close=%.1f%% far=%.1f%% count_changed=%llu proj_rot(<.05/.1/.25/.5/1/more)=%s proj_trans(<50/200/1k/5k/20k/more)=%s",
+    const auto histogram = [](const u64* counts) {
+        std::string text;
+        for (int op = 0; op < 256; op++) {
+            if (counts[op] == 0) continue;
+            char entry[24];
+            snprintf(entry, sizeof(entry), "%s%02X:%llu", text.empty() ? "" : ",", op, (unsigned long long)counts[op]);
+            text += entry;
+        }
+        return text.empty() ? std::string("-") : text;
+    };
+    const std::string diff_ops = histogram(s.diff_ops);
+    const std::string common_ops = histogram(s.common_ops);
+    return snprintf(out, size, "frames=%llu interpolated=%llu cuts=%llu over_budget=%llu mostly_unmatched=%llu camera_unmatched=%llu id_paired=%llu id_missing=%llu ignored=%llu rank_disagree=%llu identical_preferred=%llu pass2_diverged=%llu vertices_diverged=%llu commands_diverged=%llu diff_ops=%s common_ops=%s command_diffs=%llu decision_flips=%llu unmatched/frame=%.1f matrices/frame=%.0f equal=%.1f%% close=%.1f%% far=%.1f%% count_changed=%llu proj_rot(<.05/.1/.25/.5/1/more)=%s proj_trans(<50/200/1k/5k/20k/more)=%s",
                     (unsigned long long)s.frames, (unsigned long long)s.interpolated, (unsigned long long)s.camera_cuts,
                     (unsigned long long)s.over_budget, (unsigned long long)s.mostly_unmatched, (unsigned long long)s.camera_unmatched, (unsigned long long)s.id_paired, (unsigned long long)s.id_missing,
                     (unsigned long long)s.ignored, (unsigned long long)s.rank_disagree,
                     (unsigned long long)s.identical_preferred, (unsigned long long)s.pass2_diverged,
-                    (unsigned long long)s.vertices_diverged, (unsigned long long)s.commands_diverged, s.interpolated ? double(s.unmatched) / s.interpolated : 0.0,
+                    (unsigned long long)s.vertices_diverged, (unsigned long long)s.commands_diverged,
+                    diff_ops.c_str(), common_ops.c_str(), (unsigned long long)s.command_diffs,
+                    (unsigned long long)s.decision_flips, s.interpolated ? double(s.unmatched) / s.interpolated : 0.0,
                     s.frames ? double(s.matrices) / s.frames : 0.0,
                     pairs ? 100.0 * s.equal / pairs : 0.0, pairs ? 100.0 * s.close / pairs : 0.0,
                     pairs ? 100.0 * s.far / pairs : 0.0, (unsigned long long)s.count_changed, rotation, translation);
