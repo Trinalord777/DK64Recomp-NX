@@ -30,6 +30,17 @@ namespace {
     constexpr int HOC_MODULE_COUNT = 5;      // CPU, GPU, MEM, governor, display
     constexpr int HOC_DOCKED = 4;
     constexpr u32 HOC_CLOCK_MODULES = 3;     // only CPU, GPU and MEM are touched
+    // The governor module's override packs CPU, GPU and VRR states (1 disabled, 0 left as configured,
+    // Source/hoc-clk/common/include/hocclk/board.h). While the CPU governor runs, Horizon OC skips every CPU
+    // frequency (clock_manager.cpp SetClocks, noCPU): with docked_governor=2 for the title the game runs as, the CPU
+    // stayed at 1020 MHz under both profiles below. They turn the CPU governor off for the game.
+    // Horizon OC applies the modules in order, CPU (0) before the governor (3), and only when something changed: a
+    // CPU clock sent with the governor override was skipped (governor still on), then the governor turned off reset
+    // the CPU to stock and nothing changed again (measured: both calls 0x0, CPU 1020 MHz). The CPU clock is sent
+    // once Horizon OC has polled the governor override (poll_interval_ms, 300 by default).
+    constexpr u32 HOC_GOVERNOR_MODULE = 3;
+    constexpr u64 HOC_CPU_DELAY_MS = 1000;
+    constexpr u32 HOC_CPU_GOVERNOR_OFF = 1;
     constexpr const char* HOC_MARKER = "sdmc:/switch/dk64recomp/.hoc_override";
     // The CPU clock of the console's official boost mode (loading screens), on every model. At the stock docked
     // 1020 MHz the two passes of a 60 fps frame took 17-19 ms in DK Isles, over the 16.7 ms budget.
@@ -45,6 +56,10 @@ namespace {
     bool apm_changed = false;
     u32 apm_original = 0;
     AppletHookCookie hook_cookie;
+    u32 pending_cpu_mhz = 0;  // the CPU clock to send at pending_cpu_at_ms, 0 for none
+    u64 pending_cpu_at_ms = 0;
+
+    u64 now_ms() { return armTicksToNs(armGetSystemTick()) / 1000000; }
 
     // Atmosphère's sm extension 65100 answers without blocking; smGetService on a missing service waits forever.
     bool has_service(const char* name) {
@@ -69,12 +84,24 @@ namespace {
             .buffers = {{out, sizeof(*out)}});
     }
 
+    void send_pending_cpu() {
+        if (pending_cpu_mhz == 0 || now_ms() < pending_cpu_at_ms) return;
+        Service service;
+        if (open_hoc(&service)) {
+            const Result rc = hoc_override(&service, HOC_CPU_MODULE, pending_cpu_mhz * 1000000u);
+            std::printf("[DK64NX] perf: Horizon OC CPU -> %u MHz (0x%x)\n", pending_cpu_mhz, rc);
+            serviceClose(&service);
+        }
+        pending_cpu_mhz = 0;
+    }
+
     void release_hoc() {
         Service service;
         if (!open_hoc(&service)) return;
         for (u32 module = 0; module < HOC_CLOCK_MODULES; module++) {
             hoc_override(&service, module, 0);
         }
+        hoc_override(&service, HOC_GOVERNOR_MODULE, 0);
         serviceClose(&service);
         std::remove(HOC_MARKER);
         std::printf("[DK64NX] perf: Horizon OC overrides released\n");
@@ -93,10 +120,16 @@ namespace {
         hoc_profiles(&service, program, &own);
         hoc_profiles(&service, HOC_GLOBAL_PROFILE, &global);
         if (FILE* marker = std::fopen(HOC_MARKER, "w")) std::fclose(marker);
+        hoc_override(&service, HOC_GOVERNOR_MODULE, HOC_CPU_GOVERNOR_OFF);
         for (u32 module = 0; module < HOC_CLOCK_MODULES; module++) {
             const u32 own_mhz = own.mhz[HOC_DOCKED][module];
             const u32 mhz = own_mhz != 0 ? own_mhz : global.mhz[HOC_DOCKED][module];
             if (mhz == 0) continue;
+            if (module == HOC_CPU_MODULE) {
+                pending_cpu_mhz = mhz;
+                pending_cpu_at_ms = now_ms() + HOC_CPU_DELAY_MS;
+                continue;
+            }
             const Result rc = hoc_override(&service, module, mhz * 1000000u);
             std::printf("[DK64NX] perf: Horizon OC module %u -> %u MHz (0x%x)\n", module, mhz, rc);
         }
@@ -110,9 +143,11 @@ namespace {
             return;
         }
         if (FILE* marker = std::fopen(HOC_MARKER, "w")) std::fclose(marker);
-        const Result rc = hoc_override(&service, HOC_CPU_MODULE, CPU_BOOST_MHZ * 1000000u);
-        std::printf("[DK64NX] perf: Horizon OC CPU -> %u MHz (0x%x)\n", CPU_BOOST_MHZ, rc);
+        const Result governor_rc = hoc_override(&service, HOC_GOVERNOR_MODULE, HOC_CPU_GOVERNOR_OFF);
+        std::printf("[DK64NX] perf: Horizon OC CPU governor off (0x%x)\n", governor_rc);
         serviceClose(&service);
+        pending_cpu_mhz = CPU_BOOST_MHZ;
+        pending_cpu_at_ms = now_ms() + HOC_CPU_DELAY_MS;
     }
 
     void apply_apm_docked_gpu() {
@@ -124,6 +159,7 @@ namespace {
     }
 
     void release() {
+        pending_cpu_mhz = 0;
         if (apm_changed) {
             apmSetPerformanceConfiguration(ApmPerformanceMode_Normal, apm_original);
             apm_changed = false;
@@ -163,7 +199,10 @@ void dk64nx_perf_start() {
 void dk64nx_perf_update() {
     const Profile wanted = focused ? static_cast<Profile>(nx::get(nx::Setting::ClockProfile)) : Profile::ConsoleDefault;
     const bool handheld = appletGetOperationMode() == AppletOperationMode_Handheld;
-    if (wanted == applied && handheld == applied_in_handheld) return;
+    if (wanted == applied && handheld == applied_in_handheld) {
+        send_pending_cpu();
+        return;
+    }
     release();
     apply(wanted, handheld);
 }
