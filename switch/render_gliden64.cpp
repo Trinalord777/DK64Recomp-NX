@@ -48,6 +48,10 @@ extern "C" bool dk64nx_interp_begin_second_pass(uint32_t first_pass_us, bool wan
 extern "C" void dk64nx_interp_end_second_pass();
 extern "C" bool dk64nx_interp_present_in_between(uint32_t origin);
 extern "C" void dk64nx_interp_present_done();
+extern "C" bool dk64nx_claim_screen_update();  // ultramodern events.cpp
+extern "C" void dk64nx_interp_pass2_done(uint32_t us);
+// Dev harness: gl midpresent 0|1 (gliden64_rt64ex.cpp).
+std::atomic<bool> dk64nx_mid_present{true};
 
 // Time of the last display list's passes in microseconds (second: 0 when it had no in-between image), for the
 // NX Options performance overlay.
@@ -58,6 +62,7 @@ std::atomic<uint32_t> dk64nx_pass2_us{0};
 uint64_t dk64nx_dl_ring[512];
 uint32_t dk64nx_dl_buffer_ring[512];  // color buffer of each display list, bit 31: it got an in-between image
 uint32_t dk64nx_dl_us_ring[512];      // its first pass, in microseconds
+uint32_t dk64nx_dl_us2_ring[512];     // its second pass, 0 without an in-between image
 std::atomic<uint32_t> dk64nx_dl_count{0};
 
 namespace {
@@ -211,13 +216,18 @@ namespace {
             DK64NX_DL_BUFFER(dl_index, second_pass);
             dk64nx_dl_us_ring[dl_index % 512] = dk64nx_pass1_us;
             if (second_pass) {
+                // The screen update of a VI that went by during the first pass is presented now, not after the
+                // second (lib/N64ModernRuntime/ultramodern/src/events.cpp, dk64nx_claim_screen_update).
+                if (dk64nx_mid_present && dk64nx_claim_screen_update()) update_screen();
                 dk64nx_rt64ex_restore_state();
                 sp_status_reg = 0x0203;
                 ProcessDList();
                 dk64nx_interp_end_second_pass();
                 DK64NX_TIME(3, second);
                 dk64nx_pass2_us = static_cast<uint32_t>(armTicksToNs(armGetSystemTick() - second) / 1000);
+                dk64nx_interp_pass2_done(dk64nx_pass2_us);
             }
+            dk64nx_dl_us2_ring[dl_index % 512] = dk64nx_pass2_us;
             DK64NX_TIME(0, start);
         }
 

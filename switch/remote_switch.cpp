@@ -38,6 +38,7 @@ extern uint64_t dk64nx_dl_ring[];                    // render_gliden64.cpp, 512
 extern std::atomic<uint32_t> dk64nx_dl_count;
 extern uint32_t dk64nx_dl_buffer_ring[];              // render_gliden64.cpp, 512 entries
 extern uint32_t dk64nx_dl_us_ring[];
+extern uint32_t dk64nx_dl_us2_ring[];
 extern uint64_t dk64nx_swap_ring[];                   // events.cpp, 256 entries
 extern uint32_t dk64nx_swap_buffer_ring[];
 extern std::atomic<uint32_t> dk64nx_swap_count;
@@ -171,7 +172,8 @@ namespace {
         for (uint32_t i = presents - COUNT; i < presents; i++) out += std::to_string(shown_ring[i % PRESENT_RING]) + ",";
         out += " o=";
         for (uint32_t i = presents - COUNT; i < presents; i++) out += std::to_string(origin_ring[i % PRESENT_RING]) + ",";
-        // The display lists of the same window: start in microseconds (negative before it), color buffer, in-between.
+        // The display lists of the same window: start in microseconds (negative before it), color buffer, in-between,
+        // first and second pass in microseconds.
         out += " d=";
         const uint32_t dls = dk64nx_dl_count.load();
         for (uint32_t i = dls - std::min<uint32_t>(dls, 200); i < dls; i++) {
@@ -179,7 +181,8 @@ namespace {
                                 static_cast<int64_t>(armTicksToNs(origin))) / 1000;
             const uint32_t buffer = dk64nx_dl_buffer_ring[i % 512];
             out += std::to_string(us) + ":" + std::to_string(buffer & 0x7FFFFFFF) + ":" + std::to_string(buffer >> 31) + ":" +
-                   std::to_string(dk64nx_dl_us_ring[i % 512]) + ",";
+                   std::to_string(dk64nx_dl_us_ring[i % 512]) + ":" + std::to_string(dk64nx_dl_us2_ring[i % 512]) +
+                   ",";
         }
         // The game's swaps (osViSwapBuffer): time, buffer.
         out += " w=";

@@ -187,7 +187,7 @@ index 8ca779e..f415d72 100644
  #else
      std::quick_exit(exit_status);
 diff --git a/ultramodern/src/events.cpp b/ultramodern/src/events.cpp
-index 17d7a47..07ba9b9 100644
+index 17d7a47..86f2417 100644
 --- a/ultramodern/src/events.cpp
 +++ b/ultramodern/src/events.cpp
 @@ -17,6 +17,10 @@
@@ -201,7 +201,7 @@ index 17d7a47..07ba9b9 100644
  
  static ultramodern::events::callbacks_t events_callbacks{};
  
-@@ -184,6 +188,16 @@ extern moodycamel::LightweightSemaphore graphics_shutdown_ready;
+@@ -184,6 +188,36 @@ extern moodycamel::LightweightSemaphore graphics_shutdown_ready;
  
  void set_dummy_vi(bool odd);
  
@@ -213,12 +213,32 @@ index 17d7a47..07ba9b9 100644
 +#ifdef __SWITCH__
 +// Waits for the display's vblank at 60 fps (interpolated); false when the timer paces the VI (switch/vsync_switch.cpp).
 +extern "C" bool dk64nx_wait_vsync();
++
++// A 60 fps display list is drawn twice (switch/render_gliden64.cpp). When the two passes outlast a VI, the screen
++// updates of the VIs that went by waited behind them and were presented back to back once both passes were done:
++// the display shows the last image presented before its vblank, so the first of the two was never seen (measured
++// in DK Isles at 1020 MHz: an in-between at 1353.2 ms, the real image at 1354.0, one vblank for both). Between the
++// passes the renderer presents the update that is due (dk64nx_claim_screen_update); the queued action it stood for
++// is then skipped.
++static std::mutex latest_screen_regs_mutex;
++static ultramodern::renderer::ViRegs latest_screen_regs;
++static std::atomic_int screen_updates_presented_early{0};
++
++extern "C" bool dk64nx_claim_screen_update() {
++    if (pending_screen_updates.load() <= screen_updates_presented_early.load()) return false;
++    {
++        std::lock_guard lock{latest_screen_regs_mutex};
++        events_context.vi.update_screen_regs = latest_screen_regs;
++    }
++    screen_updates_presented_early.fetch_add(1);
++    return true;
++}
 +#endif
 +
  void vi_thread_func() {
      ultramodern::set_native_thread_name("VI Thread");
      // This thread should be prioritized over every other thread in the application, as it's what allows
-@@ -209,7 +223,13 @@ void vi_thread_func() {
+@@ -209,7 +243,13 @@ void vi_thread_func() {
              // printf("Skipping the next VI wait\n");
              next = std::chrono::high_resolution_clock::now();
          }
@@ -232,7 +252,7 @@ index 17d7a47..07ba9b9 100644
          auto time_now = ultramodern::time_since_start();
          // Calculate how many VIs have passed
          uint64_t new_total_vis = (time_now * (60 * ultramodern::get_speed_multiplier()) / 1000ms) + 1;
-@@ -227,12 +247,23 @@ void vi_thread_func() {
+@@ -227,12 +267,27 @@ void vi_thread_func() {
              events_context.action_queue.enqueue(DummyWorkloadAction{events_context.vi.get_next_state()->framebuffer});
          }
  
@@ -242,6 +262,10 @@ index 17d7a47..07ba9b9 100644
 +        // each buffer one VI late, and DK64 (no RDP freeze) had already drawn its next frame into that buffer for the
 +        // second VI: at 60 fps the real image of each frame was lost or its in-between came too early.
 +        events_context.vi.update_vi();
++        {
++            std::lock_guard lock{latest_screen_regs_mutex};
++            latest_screen_regs = events_context.vi.regs;
++        }
 +        pending_screen_updates.fetch_add(1);
 +        events_context.action_queue.enqueue(ScreenUpdateAction{ events_context.vi.regs });
 +#else
@@ -256,7 +280,7 @@ index 17d7a47..07ba9b9 100644
  
          // If the game has started, handle sending VI and AI events.
          if (ultramodern::is_game_started()) {
-@@ -386,6 +417,17 @@ void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_re
+@@ -386,6 +441,22 @@ void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_re
              }
              else if (const auto* screen_update_action = std::get_if<ScreenUpdateAction>(&action)) {
                  events_context.vi.update_screen_regs = screen_update_action->regs;
@@ -266,6 +290,11 @@ index 17d7a47..07ba9b9 100644
 +                // compiles) never shrinks, and moodycamel keeps serving the fuller VI producer while gfx
 +                // tasks starve. Skip an
 +                // update when a newer one is already queued behind it.
++                if (screen_updates_presented_early.load() > 0) {
++                    screen_updates_presented_early.fetch_sub(1);
++                    pending_screen_updates.fetch_sub(1);
++                    continue;
++                }
 +                if (pending_screen_updates.fetch_sub(1) > 1) {
 +                    dk64nx_dropped_screen_updates.fetch_add(1);
 +                    continue;
@@ -274,7 +303,7 @@ index 17d7a47..07ba9b9 100644
                  renderer_context->update_screen();
                  display_refresh_rate = renderer_context->get_display_framerate();
                  resolution_scale = renderer_context->get_resolution_scale();
-@@ -459,9 +501,22 @@ void set_dummy_vi(bool odd) {
+@@ -459,9 +530,22 @@ void set_dummy_vi(bool odd) {
      }
  }
  

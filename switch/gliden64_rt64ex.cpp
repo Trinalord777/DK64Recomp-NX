@@ -263,8 +263,24 @@ static f32 cut_translation = 5000.0f;
 // as the first. Measured in Creepy Castle at 1020 MHz, 3x, over 199 frames: no limit lost 34-49 frames, 17 ms lost 26
 // (75% with an in-between), 15 ms lost 2 (68%), 11-13 ms lost 2 (50%). Dev harness: gl pass2max <microseconds>.
 extern "C" unsigned long long dk64nx_ms_since_boot();  // main_switch.cpp
+extern std::atomic<bool> dk64nx_mid_present;  // render_gliden64.cpp
 
 static u32 pass2_max_us = 15000;
+
+// The budget is the two passes (2 x pass2_max_us), the second predicted from the last ones rather than taken equal to
+// the first: the second pass replays a display list whose textures and shaders the first pass has just loaded, so a
+// first pass slowed by those one-time loads (a room seen for the first time) is followed by a second pass at the usual
+// cost. Touring the levels at 1020 MHz, every 5 s window with first passes over 15 ms (18-72 ms) had second passes of
+// 8.8-13.1 ms at most; each such frame had started a 30 fps hold (Galleon: 119 frames held in 70 s). A/B in the same
+// Galleon visit at 1428 MHz: 0 frames held instead of 27, 6 frames with a first pass over 15 ms kept their in-between
+// (second pass 13.1 ms at most), 2 game frames lost instead of 5. The prediction holds only while second passes are
+// measured: after a map load a heavy second pass had made every next frame over the budget, so none was measured
+// again (Creepy Castle: 201 frames of 204 without an in-between); without a second pass in the last 2 frames the
+// first pass stands for the second, as before. Dev harness: gl gate 0 (first pass alone, as before) or 1.
+static bool predict_pass2 = true;
+static u32 pass2_last_us = 0;     // the last second pass, 0 before any
+static u32 pass2_average_us = 0;  // decaying average of the second passes (1/8 per pass)
+static u32 pass2_frame = 0;       // frames_begun when the last second pass ran
 
 // When frames go over that budget close together (two within hysteresis_window frames), the next ones get no
 // in-between image either for hysteresis_frames (15: half a second): a view at the edge of the budget otherwise
@@ -337,6 +353,14 @@ extern "C" int dk64nx_gliden64_set(const char* name, int value) {
     if (strcmp(name, "hystwindow") == 0) {
         const int previous = static_cast<int>(hysteresis_window);
         hysteresis_window = static_cast<u32>(value);
+        return previous;
+    }
+    if (strcmp(name, "midpresent") == 0) {
+        return dk64nx_mid_present.exchange(value != 0) ? 1 : 0;
+    }
+    if (strcmp(name, "gate") == 0) {
+        const int previous = predict_pass2 ? 1 : 0;
+        predict_pass2 = value != 0;
         return previous;
     }
     if (strcmp(name, "pass2max") == 0) {
@@ -871,6 +895,12 @@ extern "C" void dk64nx_interp_frame_begin() {
 // After the first pass, which took first_pass_us. False when this frame gets no in-between image; wanted is false on
 // the frames the chosen frame rate (between 30 and 60) leaves without one. Called for every frame either way: the
 // bookkeeping of the buffer just drawn (a stale in-between dropped, the frame it holds) must not be skipped.
+extern "C" void dk64nx_interp_pass2_done(u32 us) {
+    pass2_frame = frames_begun;
+    pass2_last_us = us;
+    pass2_average_us = pass2_average_us == 0 ? us : pass2_average_us + (static_cast<s32>(us - pass2_average_us) / 8);
+}
+
 extern "C" bool dk64nx_interp_begin_second_pass(u32 first_pass_us, bool wanted) {
     FrameBuffer* buffer = frameBufferList().getCurrent();
     if (buffer != nullptr) {
@@ -889,7 +919,9 @@ extern "C" bool dk64nx_interp_begin_second_pass(u32 first_pass_us, bool wanted) 
     // Counted, and the hysteresis hold started, on every frame, also on those the frame rate leaves without an
     // in-between image, so the readouts and the hold do not depend on the chosen rate.
     const bool cut = camera_cut || jumped;
-    const bool over = !cut && first_pass_us > pass2_max_us;
+    const bool measured = predict_pass2 && pass2_last_us != 0 && frames_begun - pass2_frame <= 2;
+    const u32 predicted_pass2_us = measured ? std::max(pass2_last_us, pass2_average_us) : first_pass_us;
+    const bool over = !cut && first_pass_us + predicted_pass2_us > 2 * pass2_max_us;
     if (cut || over) {
         if (over) {
             if (last_over != 0 && frames_begun - last_over <= hysteresis_window) {
