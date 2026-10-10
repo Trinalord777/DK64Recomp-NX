@@ -21,6 +21,19 @@ threading model. The PC version is built and released from upstream; its README 
 </p>
 <p align="center"><sub>Captured on a Nintendo Switch with the console's Capture button.</sub></p>
 
+<p align="center">
+  <img src="docs/screenshots/isles-beach.jpg" width="49%" alt="DK Isles beach at 60 fps">
+  <img src="docs/screenshots/isles-pads.jpg" width="49%" alt="DK Isles, the numbered pads and Lanky's barrel">
+  <img src="docs/screenshots/japes.jpg" width="49%" alt="Jungle Japes">
+  <img src="docs/screenshots/factory.jpg" width="49%" alt="Frantic Factory">
+  <img src="docs/screenshots/factory-lobby.jpg" width="49%" alt="Frantic Factory's lobby">
+  <img src="docs/screenshots/galleon.jpg" width="49%" alt="Swimming in Gloomy Galleon">
+  <img src="docs/screenshots/fungi.jpg" width="49%" alt="Fungi Forest">
+  <img src="docs/screenshots/caves.jpg" width="49%" alt="Crystal Caves">
+</p>
+<p align="center"><sub>Through the levels at 60 fps, captured on the console with the developer test server; the
+performance overlay is on, top left.</sub></p>
+
 ## What you need
 
 - **A Switch running custom firmware** (Atmosphère) with the Homebrew Menu.
@@ -101,6 +114,13 @@ LOD, the texture filter and mods, which apply at the next start (the Restart Gam
 | **Settings** | Picture, overlays, frame rate and clocks, sound, controls, camera, and the menu's own look |
 | **Enhancements** | Gameplay tweaks, mods, and the GameShark cheats grouped by Kong |
 | **Dev Tools** | Where you are, warps to any level, inventory, unlocks, game flags, interpolation statistics |
+
+<p align="center">
+  <img src="docs/screenshots/nx-options.jpg" width="49%" alt="NX Options, Settings tab">
+  <img src="docs/screenshots/overlays.jpg" width="49%" alt="Performance overlay, gameplay timer and input viewer">
+</p>
+<p align="center"><sub>NX Options over the game, and the overlays: performance top left, gameplay timer top right,
+input viewer bottom right.</sub></p>
 
 ### Picture
 
