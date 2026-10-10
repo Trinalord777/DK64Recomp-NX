@@ -45,7 +45,9 @@ extern std::atomic<int> dk64nx_dropped_screen_updates;
 extern "C" int dk64nx_interp_stats(char* out, int size);
 extern "C" void dk64nx_interp_request_projections();
 extern "C" int dk64nx_interp_projections(char* out, int size);
-extern "C" bool dk64nx_interp_capture(uint32_t* width, uint32_t* height, const uint8_t** real, const uint8_t** in_between);
+extern "C" bool dk64nx_interp_capture(uint32_t* width, uint32_t* height, const uint8_t** real, const uint8_t** in_between,
+                                      bool on_change);
+extern "C" int dk64nx_interp_pair_dump(char* out, int size);
 
 // Graphics thread: the image of the present under way, in half frames (render_gliden64.cpp).
 uint32_t dk64nx_shown_position = 0;
@@ -312,14 +314,16 @@ namespace {
             stick.until = now_ms() + ms;
             return "OK\n";
         }
-        if (command == "ishot") {
-            // Real and in-between copies of the next interpolated frame (60 fps mode), back to back.
+        if (command == "ishot" || command == "ishotc") {
+            // Real and in-between copies of the next interpolated frame (60 fps mode), back to back; ishotc waits for
+            // a frame whose matrix count changed (and keeps its pairing report for pairdump).
             *binary_sent = true;
             uint32_t width = 0, height = 0;
             const uint8_t* real = nullptr;
             const uint8_t* in_between = nullptr;
-            if (!dk64nx_interp_capture(&width, &height, &real, &in_between)) {
-                send_all(fd, "ERR no interpolated frame within 2 s\n", 37);
+            if (!dk64nx_interp_capture(&width, &height, &real, &in_between, command == "ishotc")) {
+                const char* error = "ERR no interpolated frame in time\n";
+                send_all(fd, error, std::strlen(error));
                 return "";
             }
             const size_t size = size_t(width) * height * 4;
@@ -376,6 +380,12 @@ namespace {
         if (command == "pace") return pace_report();
         if (command == "frames") return frames_report();
         if (command == "dls") return dls_report();
+        if (command == "pairdump") {
+            std::string out(1 << 18, '\0');
+            const int length = dk64nx_interp_pair_dump(out.data(), static_cast<int>(out.size()));
+            out.resize(std::max(0, std::min(length, static_cast<int>(out.size()) - 1)));
+            return "OK\n" + out + "END\n";
+        }
         if (command == "proj") {
             // The projection matrices of the next interpolated frame and of the one before it.
             dk64nx_interp_request_projections();

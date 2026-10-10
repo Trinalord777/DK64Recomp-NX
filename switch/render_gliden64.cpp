@@ -42,6 +42,8 @@ extern uint32_t dk64nx_shown_origin;
 #endif
 bool dk64nx_front_buffer_redrawn(uint32_t origin);
 extern "C" void dk64nx_interp_frame_begin();
+extern "C" void dk64nx_rt64ex_save_state();
+extern "C" void dk64nx_rt64ex_restore_state();
 extern "C" bool dk64nx_interp_begin_second_pass(uint32_t first_pass_us);
 extern "C" void dk64nx_interp_end_second_pass();
 extern "C" bool dk64nx_interp_present_in_between(uint32_t origin);
@@ -187,6 +189,7 @@ namespace {
             dk64nx_dl_ring[dl_index % 512] = start;
             dk64nx_dl_count = dl_index + 1;
             dk64nx_interp_frame_begin();
+            dk64nx_rt64ex_save_state();
             ProcessDList();
             const uint64_t second = armGetSystemTick();
             DK64NX_TIME(2, start);
@@ -197,6 +200,7 @@ namespace {
             DK64NX_DL_BUFFER(dl_index, second_pass);
             dk64nx_dl_us_ring[dl_index % 512] = dk64nx_pass1_us;
             if (second_pass) {
+                dk64nx_rt64ex_restore_state();
                 sp_status_reg = 0x0203;
                 ProcessDList();
                 dk64nx_interp_end_second_pass();

@@ -75,10 +75,11 @@ def main() -> int:
     args = parser.parse_args()
 
     with socket.create_connection((args.host, PORT), timeout=10) as sock:
-        if args.command[0] == "ishot":
+        if args.command[0] in ("ishot", "ishotc"):
             # Real and in-between copies of one interpolated frame: <prefix>_real.png, <prefix>_between.png.
+            # ishotc waits for a frame whose matrix count changed.
             prefix = args.command[1] if len(args.command) > 1 else "ishot"
-            sock.sendall(b"ishot\n")
+            sock.sendall(f"{args.command[0]}\n".encode())
             header = read_line(sock)
             if not header.startswith("OK"):
                 print(header, file=sys.stderr)
@@ -101,7 +102,7 @@ def main() -> int:
             return 0
         sock.sendall((" ".join(args.command) + "\n").encode())
         reply = read_line(sock)
-        if args.command[0] == "exp" and reply == "OK":
+        if args.command[0] in ("exp", "pairdump") and reply == "OK":
             while (line := read_line(sock)) != "END":
                 print(line)
             return 0

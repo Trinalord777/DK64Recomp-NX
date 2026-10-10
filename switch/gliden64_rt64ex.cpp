@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "CRC.h"
 #include "Combiner.h"
 #include "Config.h"
 #include "Graphics/Context.h"
@@ -78,6 +79,24 @@ namespace {
     std::vector<gSPInfo::Viewport> viewport_stack;
     std::vector<gDPScissor> scissor_stack;
     std::vector<std::pair<bool, bool>> scissor_flag_stack;  // wide, plain
+
+    // The extended state carries from one display list to the next, as the N64's does. At 60 fps a list runs twice,
+    // and the second pass would start with what the first left instead of what it started with; both passes now start
+    // from the same state, so that only the interpolated matrices tell their images apart (checked on the console:
+    // with interpolation off, the second image equals the first, mean difference 0.00 over 10 DK TV frames).
+    struct ExtendedState {
+        bool extended_rdram, proj_stretch, scissor_wide, scissor_plain;
+        u16 viewport_origin, rect_left_origin, rect_right_origin;
+        u8 rect_aspect;
+        std::vector<gSPInfo::Viewport> viewports;
+        std::vector<gDPScissor> scissors;
+        std::vector<std::pair<bool, bool>> scissor_flags;
+    };
+    ExtendedState first_pass_state;
+    // GLideN64's RSP and RDP state (segments, viewport, matrices, tiles, render modes) and TMEM carry over too.
+    gSPInfo first_pass_gsp;
+    gDPInfo first_pass_gdp;
+    u64 first_pass_tmem[512];
 
     // Word `index` (0 = w0) of the extra command `extra` (1-based) following the current one.
     u32 extra_word(u32 extra, u32 index) {
@@ -244,6 +263,10 @@ static f32 cut_translation = 5000.0f;
 // (75% with an in-between), 15 ms lost 2 (68%), 11-13 ms lost 2 (50%). Dev harness: gl pass2max <microseconds>.
 static u32 pass2_max_us = 15000;
 
+// Dev harness experiment (gl lerpmask): which matrices the second pass interpolates. 1: paired by group ID,
+// 2: paired by rank and likeness, 4: projections. 0 makes the in-between image a plain second render of the frame.
+static u32 lerp_mask = 7;
+
 // Graphics thread: GLideN64 saves its shaders storage (the combiners seen so far, compiled again at the next start) only
 // at shutdown, which the game closed from the HOME menu never reaches: every session then compiled each new effect in
 // the middle of play, a freeze of up to 122 ms measured. The swap hook calls this every few seconds.
@@ -260,6 +283,11 @@ extern "C" int dk64nx_gliden64_set(const char* name, int value) {
     if (strcmp(name, "cuttrans") == 0) {
         const int previous = static_cast<int>(cut_translation);
         cut_translation = static_cast<f32>(value);
+        return previous;
+    }
+    if (strcmp(name, "lerpmask") == 0) {
+        const int previous = static_cast<int>(lerp_mask);
+        lerp_mask = static_cast<u32>(value);
         return previous;
     }
     if (strcmp(name, "pass2max") == 0) {
@@ -346,6 +374,28 @@ namespace {
 
     bool substituting = false;  // second pass: matrices are replaced by rank
     size_t frame_unmatched = 0;  // in this second pass
+    // The second pass loaded other matrices, vertices or commands than the first: the game builds its next frame while
+    // the list is processed, and rewrote part of what this one draws in between (the N64's RSP reads a list once,
+    // early). Measured in DK TV: 3-9% of the frames while its logo and text show, none elsewhere. An in-between image
+    // drawn from both versions would mix them, and substitutions after a matrix mismatch land on the wrong rank, so
+    // the in-between image is dropped and the real one shows twice.
+    bool pass2_diverged = false;
+    // Vertex loads of the first pass (address, hash of the data), checked against the second pass's.
+    struct VertexLoad { u32 address; u64 hash; };
+    bool vertices_diverged_frame = false;
+    // Every command each pass executed (FNV-1a of both words, and their count): a display list the game edited between
+    // the passes (HUD sub-lists, rectangles, texture coordinates) shows here even when no matrix or vertex changed.
+    constexpr u64 FNV_OFFSET = 0xcbf29ce484222325ULL;
+    constexpr u64 FNV_PRIME = 0x100000001b3ULL;
+    u64 command_hash = FNV_OFFSET;
+    u64 command_count = 0;
+    u64 first_pass_command_hash = 0;
+    u64 first_pass_command_count = 0;
+    std::vector<VertexLoad> vertices_current;
+    size_t vertex_rank = 0;
+    // Dev harness (ishotc / pairdump): how each matrix of the second pass was paired: method and twin rank.
+    struct PairLog { char method; ptrdiff_t twin; };
+    std::vector<PairLog> pair_log;
     bool frame_camera_unmatched = false;
     size_t substitute_rank = 0;
     ptrdiff_t rank_shift = 0;   // previous rank - current rank of the last match
@@ -382,6 +432,10 @@ namespace {
         u64 id_missing = 0;        // ... whose ID and index were not in the previous frame
         u64 ignored = 0;           // ... in a group that asks for no interpolation
         u64 rank_disagree = 0;     // ID pairs where the rank and likeness search would have picked another matrix
+        u64 identical_preferred = 0;  // rank searches where an identical matrix won over a nearer-ranked close one
+        u64 pass2_diverged = 0;       // in-between images dropped: the second pass loaded other matrices or vertices
+        u64 vertices_diverged = 0;    // ... of which the vertices differed
+        u64 commands_diverged = 0;    // ... of which the commands differed
         u64 projection_rotation[EDGE_COUNT + 1] = {};
         u64 projection_translation[EDGE_COUNT + 1] = {};
     } match_stats;
@@ -434,9 +488,24 @@ namespace {
     // order: the HUD's orthographic matrix comes before the camera in some frames and after it in others, and the 3D
     // HUD icons have their own perspective camera (square aspect); paired by order (6e48917), the camera was averaged
     // with one of them on the frames where their number changed, and the in-between image exploded.
+    //
+    // A loaded projection (perspective or orthographic) must also keep its scale: its diagonal (field of view, aspect,
+    // the ortho's 2/width) within 2%. The absolute limit let the HUD's 320x240 ortho (0.006) pair with its 640x480 one
+    // (0.002) when DK TV's blinking text shifted their indices in the camera's group, and the DK64 logo drawn with the
+    // average shrank toward the top left of every other second's in-between image.
     bool same_camera(const LoadedMatrix& a, const LoadedMatrix& b, const MatrixDelta& d) {
-        return a.param == b.param && perspective(a) == perspective(b) && d.linear < cut_rotation &&
-               d.translation < cut_translation && d.projective < 0.05f;
+        if (a.param != b.param || perspective(a) != perspective(b) || d.linear >= cut_rotation ||
+            d.translation >= cut_translation || d.projective >= 0.05f) {
+            return false;
+        }
+        if (a.param & G_MTX_LOAD) {
+            for (int i = 0; i < 3; i++) {
+                const f32 x = a.m[i][i];
+                const f32 y = b.m[i][i];
+                if (std::fabs(x - y) > 0.02f * std::max(std::fabs(x), std::fabs(y)) + 1e-7f) return false;
+            }
+        }
+        return true;
     }
 
     // The previous frame's projection most like this one among those that can be the same camera, or -1.
@@ -485,13 +554,26 @@ namespace {
         if (now.param & G_MTX_PROJECTION) return projection_twin(rank);
         const ptrdiff_t expected = static_cast<ptrdiff_t>(rank) + rank_shift;
         const ptrdiff_t count = static_cast<ptrdiff_t>(matrices_previous.size());
+        ptrdiff_t nearest = -1;
         for (ptrdiff_t offset = 0; offset <= static_cast<ptrdiff_t>(MATCH_WINDOW); offset++) {
             for (const ptrdiff_t j : {expected - offset, expected + offset}) {
-                if (j >= 0 && j < count && same_object(matrices_previous[j], now)) return j;
+                if (j < 0 || j >= count) continue;
+                const LoadedMatrix& before = matrices_previous[j];
+                // An identical matrix is the same still object (a logo, the HUD, the scenery) and wins over a nearer
+                // rank: when an element before it comes or goes, the ranks after it shift, and a nearer one only close
+                // enough would move a still object (it decided 68-79 pairs per DK TV run).
+                if (before.param == now.param && memcmp(before.m, now.m, sizeof(now.m)) == 0) {
+                    if (nearest >= 0) {
+                        std::lock_guard lock{match_mutex};
+                        match_stats.identical_preferred++;
+                    }
+                    return j;
+                }
+                if (nearest < 0 && same_object(before, now)) nearest = j;
                 if (offset == 0) break;
             }
         }
-        return -1;
+        return nearest;
     }
 
     // The main camera of a frame: its first perspective projection loaded, and the look-at multiplied onto it.
@@ -568,6 +650,24 @@ static ptrdiff_t id_twin(const LoadedMatrix& now) {
     return static_cast<ptrdiff_t>(found->second);
 }
 
+void RT64EX_OnCommand(u32 w0, u32 w1) {
+    command_hash = (command_hash ^ ((static_cast<u64>(w0) << 32) | w1)) * FNV_PRIME;
+    command_count++;
+}
+
+void RT64EX_OnVertices(u32 address, u32 size) {
+    const u64 hash = CRC_Calculate(0xFFFFFFFF, RDRAM + address, size);
+    if (!substituting) {
+        vertices_current.push_back({address, hash});
+        return;
+    }
+    const size_t rank = vertex_rank++;
+    if (rank >= vertices_current.size() || vertices_current[rank].address != address || vertices_current[rank].hash != hash) {
+        pass2_diverged = true;
+        vertices_diverged_frame = true;
+    }
+}
+
 void RT64EX_OnMatrix(u32 address, u8 param, f32 mtx[4][4]) {
     if (!substituting) {
         LoadedMatrix loaded{address, param, {}};
@@ -577,9 +677,19 @@ void RT64EX_OnMatrix(u32 address, u8 param, f32 mtx[4][4]) {
         return;
     }
     const size_t rank = substitute_rank++;
-    if (rank >= matrices_current.size()) return;
+    pair_log.push_back({'D', -1});
+    if (pass2_diverged) return;
+    if (rank >= matrices_current.size()) {
+        pass2_diverged = true;
+        return;
+    }
     const LoadedMatrix& now = matrices_current[rank];
+    if (now.address != address || now.param != param || memcmp(now.m, mtx, sizeof(now.m)) != 0) {
+        pass2_diverged = true;
+        return;
+    }
     if (now.pairing == Pairing::Ignored) {
+        pair_log.back().method = 'i';
         std::lock_guard lock{match_mutex};
         match_stats.ignored++;
         return;
@@ -595,6 +705,7 @@ void RT64EX_OnMatrix(u32 address, u8 param, f32 mtx[4][4]) {
     } else {
         twin = find_twin(rank);
     }
+    pair_log.back() = {now.pairing == Pairing::ById ? 'I' : 'H', twin};
     if (twin < 0) {
         std::lock_guard lock{match_mutex};
         match_stats.unmatched++;
@@ -603,6 +714,8 @@ void RT64EX_OnMatrix(u32 address, u8 param, f32 mtx[4][4]) {
         return;
     }
     rank_shift = twin - static_cast<ptrdiff_t>(rank);
+    const u32 kind = (param & G_MTX_PROJECTION) ? 4u : (now.pairing == Pairing::ById ? 1u : 2u);
+    if ((lerp_mask & kind) == 0) return;
     const LoadedMatrix& before = matrices_previous[twin];
     // Components the group leaves alone keep this frame's value (RT64: G_EX_COMPONENT_SKIP): the translation row
     // (position), the 3x3 part (rotation, scale, skew) and the projective column (perspective).
@@ -643,6 +756,9 @@ extern "C" void dk64nx_interp_frame_begin() {
         std::swap(matrices_previous, matrices_current);
     }
     matrices_current.clear();
+    vertices_current.clear();
+    command_hash = FNV_OFFSET;
+    command_count = 0;
     camera_cut = false;
     frames_begun++;
     previous_by_group.clear();
@@ -686,6 +802,14 @@ extern "C" bool dk64nx_interp_begin_second_pass(u32 first_pass_us) {
     saved_address = buffer->m_startAddress;
     substituting = true;
     reset_matrix_groups();
+    pass2_diverged = false;
+    first_pass_command_hash = command_hash;
+    first_pass_command_count = command_count;
+    command_hash = FNV_OFFSET;
+    command_count = 0;
+    vertex_rank = 0;
+    vertices_diverged_frame = false;
+    pair_log.clear();
     frame_unmatched = 0;
     frame_camera_unmatched = false;
     substitute_rank = 0;
@@ -698,6 +822,39 @@ namespace {
     std::mutex capture_mutex;
     std::condition_variable capture_cv;
     bool capture_wanted = false;
+    bool capture_on_change = false;  // only a frame whose matrix count differs from the previous one's
+    std::string pair_dump;
+
+    void dump_pairs() {
+        char line[200];
+        std::string out;
+        snprintf(line, sizeof(line), "previous %zu current %zu diverged %d\n", matrices_previous.size(),
+                 matrices_current.size(), pass2_diverged ? 1 : 0);
+        out += line;
+        for (size_t i = 0; i < matrices_current.size(); i++) {
+            const LoadedMatrix& m = matrices_current[i];
+            const PairLog log = i < pair_log.size() ? pair_log[i] : PairLog{'-', -1};
+            snprintf(line, sizeof(line), "%zu %c twin %td %08x p%02x g%08x/%u d %.3f %.3f %.3f t %.1f %.1f %.1f", i,
+                     log.method, log.twin, m.address, m.param, m.group, m.group_index, m.m[0][0], m.m[1][1],
+                     m.m[2][2], m.m[3][0], m.m[3][1], m.m[3][2]);
+            out += line;
+            if (log.twin >= 0 && static_cast<size_t>(log.twin) < matrices_previous.size()) {
+                const LoadedMatrix& b = matrices_previous[log.twin];
+                snprintf(line, sizeof(line), " | was %08x d %.3f %.3f %.3f t %.1f %.1f %.1f", b.address, b.m[0][0],
+                         b.m[1][1], b.m[2][2], b.m[3][0], b.m[3][1], b.m[3][2]);
+                out += line;
+            }
+            out += "\n";
+        }
+        out += "previous list:\n";
+        for (size_t i = 0; i < matrices_previous.size(); i++) {
+            const LoadedMatrix& m = matrices_previous[i];
+            snprintf(line, sizeof(line), "%zu %08x p%02x g%08x/%u d %.3f %.3f %.3f t %.1f %.1f %.1f\n", i, m.address,
+                     m.param, m.group, m.group_index, m.m[0][0], m.m[1][1], m.m[2][2], m.m[3][0], m.m[3][1], m.m[3][2]);
+            out += line;
+        }
+        pair_dump = out;
+    }
     bool capture_ready = false;
     std::vector<u8> capture_pixels[2];
     u32 capture_width = 0;
@@ -706,6 +863,8 @@ namespace {
     void capture_copies(FrameBuffer* buffer) {
         std::lock_guard lock{capture_mutex};
         if (!capture_wanted) return;
+        if (capture_on_change && matrices_current.size() == matrices_previous.size()) return;
+        dump_pairs();
         capture_width = buffer->m_pTexture->width;
         capture_height = buffer->m_pTexture->height;
         for (u32 slot = 0; slot < 2; slot++) {
@@ -720,11 +879,12 @@ namespace {
     }
 }
 
-extern "C" bool dk64nx_interp_capture(u32* width, u32* height, const u8** real, const u8** in_between) {
+extern "C" bool dk64nx_interp_capture(u32* width, u32* height, const u8** real, const u8** in_between, bool on_change) {
     std::unique_lock lock{capture_mutex};
     capture_ready = false;
     capture_wanted = true;
-    if (!capture_cv.wait_for(lock, std::chrono::seconds(2), [] { return capture_ready; })) {
+    capture_on_change = on_change;
+    if (!capture_cv.wait_for(lock, std::chrono::seconds(on_change ? 8 : 2), [] { return capture_ready; })) {
         capture_wanted = false;
         return false;
     }
@@ -741,6 +901,15 @@ extern "C" void dk64nx_interp_end_second_pass() {
         buffer->interpCopy(1, true);   // the in-between frame
         capture_copies(buffer);
         buffer->interpCopy(0, false);  // the real one back
+        const bool vertices_differ = vertex_rank != vertices_current.size();
+        const bool commands_differ = command_hash != first_pass_command_hash || command_count != first_pass_command_count;
+        if (pass2_diverged || vertices_differ || commands_differ || substitute_rank != matrices_current.size()) {
+            std::lock_guard lock{match_mutex};
+            match_stats.pass2_diverged++;
+            match_stats.vertices_diverged += vertices_differ || vertices_diverged_frame;
+            match_stats.commands_diverged += commands_differ;
+            return;
+        }
         in_between[buffer->m_startAddress] = {buffer, frameBufferList().findBuffer(*REG.VI_ORIGIN) == buffer};
         std::lock_guard lock{match_mutex};
         match_stats.interpolated++;
@@ -815,10 +984,12 @@ extern "C" int dk64nx_interp_stats(char* out, int size) {
              (unsigned long long)s.projection_translation[0], (unsigned long long)s.projection_translation[1],
              (unsigned long long)s.projection_translation[2], (unsigned long long)s.projection_translation[3],
              (unsigned long long)s.projection_translation[4], (unsigned long long)s.projection_translation[5]);
-    return snprintf(out, size, "frames=%llu interpolated=%llu cuts=%llu over_budget=%llu mostly_unmatched=%llu camera_unmatched=%llu id_paired=%llu id_missing=%llu ignored=%llu rank_disagree=%llu unmatched/frame=%.1f matrices/frame=%.0f equal=%.1f%% close=%.1f%% far=%.1f%% count_changed=%llu proj_rot(<.05/.1/.25/.5/1/more)=%s proj_trans(<50/200/1k/5k/20k/more)=%s",
+    return snprintf(out, size, "frames=%llu interpolated=%llu cuts=%llu over_budget=%llu mostly_unmatched=%llu camera_unmatched=%llu id_paired=%llu id_missing=%llu ignored=%llu rank_disagree=%llu identical_preferred=%llu pass2_diverged=%llu vertices_diverged=%llu commands_diverged=%llu unmatched/frame=%.1f matrices/frame=%.0f equal=%.1f%% close=%.1f%% far=%.1f%% count_changed=%llu proj_rot(<.05/.1/.25/.5/1/more)=%s proj_trans(<50/200/1k/5k/20k/more)=%s",
                     (unsigned long long)s.frames, (unsigned long long)s.interpolated, (unsigned long long)s.camera_cuts,
                     (unsigned long long)s.over_budget, (unsigned long long)s.mostly_unmatched, (unsigned long long)s.camera_unmatched, (unsigned long long)s.id_paired, (unsigned long long)s.id_missing,
-                    (unsigned long long)s.ignored, (unsigned long long)s.rank_disagree, s.interpolated ? double(s.unmatched) / s.interpolated : 0.0,
+                    (unsigned long long)s.ignored, (unsigned long long)s.rank_disagree,
+                    (unsigned long long)s.identical_preferred, (unsigned long long)s.pass2_diverged,
+                    (unsigned long long)s.vertices_diverged, (unsigned long long)s.commands_diverged, s.interpolated ? double(s.unmatched) / s.interpolated : 0.0,
                     s.frames ? double(s.matrices) / s.frames : 0.0,
                     pairs ? 100.0 * s.equal / pairs : 0.0, pairs ? 100.0 * s.close / pairs : 0.0,
                     pairs ? 100.0 * s.far / pairs : 0.0, (unsigned long long)s.count_changed, rotation, translation);
@@ -836,4 +1007,50 @@ extern "C" void dk64nx_interp_request_projections() {
 extern "C" int dk64nx_interp_projections(char* out, int size) {
     std::lock_guard lock{match_mutex};
     return snprintf(out, size, "%s", proj_dump.c_str());
+}
+
+// Graphics thread: the extended state before a display list's first pass, and again before its second pass.
+extern "C" void dk64nx_rt64ex_save_state() {
+    first_pass_gsp = gSP;
+    first_pass_gdp = gDP;
+    memcpy(first_pass_tmem, TMEM, sizeof(first_pass_tmem));
+    first_pass_state = {g_rt64ExtendedRDRAM, g_rt64ProjStretch, g_rt64ScissorWide, g_rt64ScissorPlain,
+                        g_rt64ViewportOrigin, g_rt64RectLeftOrigin, g_rt64RectRightOrigin, g_rt64RectAspect,
+                        viewport_stack, scissor_stack, scissor_flag_stack};
+}
+
+extern "C" void dk64nx_rt64ex_restore_state() {
+    // The color and depth images stay: GLideN64 keeps its current frame buffer with them, and DK64 sets both first.
+    const auto color_image = gDP.colorImage;
+    const u32 depth_image = gDP.depthImageAddress;
+    const u32 gdp_changed = gDP.changed;
+    const u32 gsp_changed = gSP.changed;
+    gSP = first_pass_gsp;
+    gDP = first_pass_gdp;
+    gDP.colorImage = color_image;
+    gDP.depthImageAddress = depth_image;
+    memcpy(TMEM, first_pass_tmem, sizeof(first_pass_tmem));
+    // Everything that reaches the GL state is applied again; never a frame buffer reload from RDRAM.
+    gSP.changed = gsp_changed | CHANGED_VIEWPORT | CHANGED_MATRIX | CHANGED_TEXTURE | CHANGED_GEOMETRYMODE |
+                  CHANGED_FOGPOSITION | CHANGED_LIGHT | CHANGED_LOOKAT | CHANGED_TEXTURESCALE;
+    gDP.changed = gdp_changed | CHANGED_RENDERMODE | CHANGED_CYCLETYPE | CHANGED_SCISSOR | CHANGED_TMEM | CHANGED_TILE |
+                  CHANGED_COMBINE | CHANGED_ALPHACOMPARE | CHANGED_FOGCOLOR | CHANGED_BLENDCOLOR;
+    const ExtendedState& state = first_pass_state;
+    g_rt64ExtendedRDRAM = state.extended_rdram;
+    g_rt64ProjStretch = state.proj_stretch;
+    g_rt64ScissorWide = state.scissor_wide;
+    g_rt64ScissorPlain = state.scissor_plain;
+    g_rt64ViewportOrigin = state.viewport_origin;
+    g_rt64RectLeftOrigin = state.rect_left_origin;
+    g_rt64RectRightOrigin = state.rect_right_origin;
+    g_rt64RectAspect = state.rect_aspect;
+    viewport_stack = state.viewports;
+    scissor_stack = state.scissors;
+    scissor_flag_stack = state.scissor_flags;
+}
+
+// Dev harness: the pairing report of the last captured frame.
+extern "C" int dk64nx_interp_pair_dump(char* out, int size) {
+    std::lock_guard lock{capture_mutex};
+    return snprintf(out, size, "%s", pair_dump.c_str());
 }
