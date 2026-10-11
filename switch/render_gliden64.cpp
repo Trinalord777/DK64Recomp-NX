@@ -266,12 +266,15 @@ namespace {
                 // The screen update of a VI that went by during the first pass is presented now, not after the
                 // second (lib/N64ModernRuntime/ultramodern/src/events.cpp, dk64nx_claim_screen_update).
                 if (dk64nx_mid_present && dk64nx_claim_screen_update()) update_screen();
+                // Pass 2's time starts here: a swap waiting for vblank above is not drawing time, and the gate predicts
+                // the next second pass from this one.
+                const uint64_t second_start = armGetSystemTick();
                 dk64nx_rt64ex_restore_state();
                 sp_status_reg = 0x0203;
                 ProcessDList();
                 dk64nx_interp_end_second_pass();
-                DK64NX_TIME(3, second);
-                dk64nx_pass2_us = static_cast<uint32_t>(armTicksToNs(armGetSystemTick() - second) / 1000);
+                DK64NX_TIME(3, second_start);
+                dk64nx_pass2_us = static_cast<uint32_t>(armTicksToNs(armGetSystemTick() - second_start) / 1000);
                 dk64nx_interp_pass2_done(dk64nx_pass2_us);
             }
             dk64nx_dl_us2_ring[dl_index % 512] = dk64nx_pass2_us;

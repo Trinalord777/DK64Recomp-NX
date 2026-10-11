@@ -226,11 +226,15 @@ namespace {
          [] { return clocks_text; }, nullptr},
 
         {"Warp", "Warp To",
-         "Left/Right: a level. A: go there now, as DK64 Recompiled's debug warp menu does. The game ignores it "
-         "during some cutscenes and menus.",
-         [] { return std::string(pending_warp.load() >= 0 ? "Warping..." : WARPS[warp_choice].name); },
+         "Left/Right: a level. A: go there now, as DK64 Recompiled's debug warp menu does. Only in an adventure: "
+         "a warp from the opening cutscene left the main menu without input.",
+         [] {
+             if (!in_adventure()) return std::string("Not in game");
+             return std::string(pending_warp.load() >= 0 ? "Warping..." : WARPS[warp_choice].name);
+         },
          [](int direction, bool wrap) {
              if (wrap) {
+                 if (!in_adventure()) return;
                  pending_warp = WARPS[warp_choice].map << 8 | WARPS[warp_choice].exit;
                  return;
              }
@@ -349,8 +353,10 @@ long nx::dev::play_time_seconds() {
 }
 std::string nx::dev::overlay_text() { return map_text() + "    " + position_text(); }
 
-void nx::dev::request_warp(int map, int exit) {
+bool nx::dev::request_warp(int map, int exit) {
+    if (!in_adventure()) return false;
     pending_warp = map << 8 | exit;
+    return true;
 }
 
 std::string nx::dev::read_clocks() {

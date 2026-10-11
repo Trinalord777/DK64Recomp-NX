@@ -17,8 +17,6 @@ extern SDL_Window* dk64nx_window;
 
 namespace {
     const char* const DATA_DIR = "sdmc:/switch/dk64recomp";
-    constexpr int SCREEN_WIDTH = 1280;
-    constexpr int SCREEN_HEIGHT = 720;
 
     struct Param {
         m64p_type type = M64TYPE_INT;
@@ -165,8 +163,8 @@ m64p_error nx_VidExt_Quit(void) {
 
 m64p_error nx_VidExt_ListFullscreenModes(m64p_2d_size* modes, int* count) {
     if (*count >= 1) {
-        modes[0].uiWidth = SCREEN_WIDTH;
-        modes[0].uiHeight = SCREEN_HEIGHT;
+        modes[0].uiWidth = nx::screen_width();
+        modes[0].uiHeight = nx::screen_height();
         *count = 1;
     }
     return M64ERR_SUCCESS;
@@ -294,9 +292,9 @@ m64p_error nx_VidExt_GL_SwapBuffers(void) {
         dk64nx_gliden64_save_shaders();
         shaders_saved_at = SDL_GetTicks64();
     }
-    dk64nx_menu_on_swap(SCREEN_WIDTH, SCREEN_HEIGHT);
+    dk64nx_menu_on_swap(nx::screen_width(), nx::screen_height());
 #ifdef DK64NX_REMOTE
-    dk64nx_remote_on_swap(SCREEN_WIDTH, SCREEN_HEIGHT);
+    dk64nx_remote_on_swap(nx::screen_width(), nx::screen_height());
 #endif
     SDL_GL_SwapWindow(dk64nx_window);
     return M64ERR_SUCCESS;
@@ -352,10 +350,11 @@ void dk64nx_seed_gliden64_config() {
     nx_ConfigOpenSection("Video-General", &general);
     nx_ConfigOpenSection("Video-GLideN64", &gliden);
     set_param(general, "Fullscreen", bool_param(true), false);
-    set_param(general, "ScreenWidth", int_param(SCREEN_WIDTH), false);
-    set_param(general, "ScreenHeight", int_param(SCREEN_HEIGHT), false);
+    set_param(general, "ScreenWidth", int_param(nx::screen_width()), false);
+    set_param(general, "ScreenHeight", int_param(nx::screen_height()), false);
     set_param(general, "VerticalSync", bool_param(true), false);
-    // 3x native (960x720) fills the height of the 720p screen; 2x (640x480) is lighter.
+    // 3x native (960x720) fills the height of the 720p screen; 2x (640x480) is lighter; 4x (1280x960) goes with the
+    // experimental 1080p window.
     set_param(gliden, "UseNativeResolutionFactor", int_param(nx::resolution_factor()), false);
     // 3 = adjust: 3D widened to 16:9, 2D kept at its aspect and placed by DK64R's RT64 alignment
     // commands (gliden64_rt64ex.cpp), i.e. the PC port's "Expand" with HUD at the screen edges. 1 = 4:3.

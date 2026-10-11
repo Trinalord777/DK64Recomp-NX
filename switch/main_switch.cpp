@@ -54,6 +54,7 @@ void dk64nx_perf_start();
 void dk64nx_perf_update();
 void dk64nx_perf_stop();
 extern "C" void dk64nx_jit_close();
+extern "C" void dk64nx_window_set_size(int width, int height);  // window_switch.c
 #ifdef DK64NX_REMOTE
 void dk64nx_remote_start();
 void dk64nx_remote_stop();
@@ -77,8 +78,6 @@ namespace {
     // librecomp's --game switch looks games up by their mod id.
     char MOD_GAME_ID[] = "dk64";
     const std::string VERSION_STRING = "1.0.3";
-    constexpr int SCREEN_WIDTH = 1280;
-    constexpr int SCREEN_HEIGHT = 720;
 
     // With the time since the console booted, to see where the start of the game goes.
     void step(const char* what) {
@@ -179,8 +178,9 @@ namespace {
 
     ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::gfx_data_t) {
         step("create window");
+        dk64nx_window_set_size(nx::screen_width(), nx::screen_height());
         dk64nx_window = SDL_CreateWindow("DK64: Recompiled", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                                         SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_OPENGL);
+                                         nx::screen_width(), nx::screen_height(), SDL_WINDOW_OPENGL);
         if (dk64nx_window == nullptr) {
             fprintf(stderr, "[DK64NX] SDL_CreateWindow failed: %s\n", SDL_GetError());
         }

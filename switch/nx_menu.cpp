@@ -1183,7 +1183,9 @@ namespace {
             ImGui_ImplOpenGL3_DestroyFontsTexture();
             ImGui_ImplOpenGL3_CreateFontsTexture();
         }
-        io.DisplaySize = {static_cast<float>(width), static_cast<float>(height)};
+        // The layout is in 1280x720 units; a 1080p window scales it up.
+        io.DisplaySize = {1280.0f, 720.0f};
+        io.DisplayFramebufferScale = {width / 1280.0f, height / 720.0f};
         io.DeltaTime = std::max(0.001f, (now - last_frame_ms) / 1000.0f);
         last_frame_ms = now;
         ImGui_ImplOpenGL3_NewFrame();

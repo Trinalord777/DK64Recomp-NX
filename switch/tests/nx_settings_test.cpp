@@ -41,6 +41,17 @@ int main() {
     assert(temporary == nullptr);
     nx::load();
     assert(nx::get(Setting::Resolution) == 1 && nx::resolution_factor() == 3);
+    assert(!nx::output_1080p() && nx::screen_width() == 1280 && nx::screen_height() == 720);
+    // The experimental 4x draws 1280x960 into a 1080p window.
+    nx::set(Setting::Resolution, 2);
+    nx::save();
+    nx::load();
+    assert(nx::resolution_factor() == 4 && nx::output_1080p() && nx::screen_width() == 1920 && nx::screen_height() == 1080);
+    nx::set(Setting::Resolution, 9);
+    assert(nx::get(Setting::Resolution) == 2);  // clamped to the last choice
+    nx::set(Setting::Resolution, 1);
+    nx::save();
+    nx::load();
     assert(nx::get(Setting::MusicVolume) == 40 && nx::get(Setting::StorySkip) == 2);
 
     // The frame rate saved before the 30-60 range: frame_rate 1 meant 60 fps, 0 meant 30; the new key wins.

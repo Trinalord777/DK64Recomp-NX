@@ -51,8 +51,9 @@ namespace {
          "16:9 fills the screen. 4:3 shows the original framing with black bars on the sides.",
          0, {"16:9", "4:3"}, 0, 0, 0, true},
         {"Display", "resolution", "Resolution",
-         "Internal resolution. 2x is lighter on the console, 3x fills the height of the 720p screen.",
-         1, {"2x (640x480)", "3x (960x720)"}, 0, 0, 0, true},
+         "Internal resolution. 2x is lighter on the console, 3x fills the height of the 720p screen. 4x "
+         "(experimental) renders 1280x960 into a 1080p output, for a docked console: heavier on the GPU.",
+         1, {"2x (640x480)", "3x (960x720)", "4x (1080p, experimental)"}, 0, 0, 0, true},
         {"Display", "texture_lod", "Texture LOD",
          "GLideN64's level of detail emulation. On blurs the Kongs' eyes and faces and tints them pink (as reported "
          "in mupen64plus-libretro-nx issue 458); Off draws them sharp.",

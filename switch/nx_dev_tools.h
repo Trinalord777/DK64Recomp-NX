@@ -28,5 +28,5 @@ namespace nx::dev {
     // The current file's play time in seconds, as the file select shows it; -1 outside a single-player adventure.
     long play_time_seconds();
     // Warp To any map and exit, taken by the game thread at its next frame (dev harness warp command).
-    void request_warp(int map, int exit);
+    bool request_warp(int map, int exit);  // false outside an adventure
 }

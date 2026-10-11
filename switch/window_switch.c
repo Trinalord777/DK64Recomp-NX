@@ -96,6 +96,12 @@ void __nx_win_init(void)
         diagAbortWithResult(MAKERESULT(Module_Libnx, LibnxError_BadGfxInit));
 }
 
+// The window's buffers, before SDL makes its EGL surface: 1280x720, or 1920x1080 for the experimental 4x.
+void dk64nx_window_set_size(int width, int height)
+{
+    nwindowSetDimensions(&g_defaultWin, width, height);
+}
+
 void __nx_win_exit(void)
 {
     if (g_vsyncReady) {

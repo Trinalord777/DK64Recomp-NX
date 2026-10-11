@@ -442,7 +442,7 @@ namespace {
             int map = 0, exit = 0;
             if (!(in >> map) || map < 0 || map > 0xFF) return "ERR usage: warp <map> [exit]\n";
             in >> exit;
-            nx::dev::request_warp(map, exit & 0xFF);
+            if (!nx::dev::request_warp(map, exit & 0xFF)) return "ERR not in an adventure\n";
             return "OK\n";
         }
         if (command == "restart") {
