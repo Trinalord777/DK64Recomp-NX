@@ -360,6 +360,32 @@ N64 it runs on, is their work; this repository adds the layer that runs it on th
 
 If you enjoy this port, the projects above are where the credit belongs.
 
+## How it was made: AI use
+
+DK64Recomp-NX was made by a person and an AI coding agent working together. Be aware of this before you use or build
+on this repository:
+
+- **This fork's own code was written with AI.** Nearly all of the Switch work (the libnx platform layer, the GLideN64
+  integration and its patches, NX Options, the 60 fps interpolation, the dev tools), its documentation and the commit
+  messages were written by Claude Opus 5.5 (Anthropic) through Claude Code. From October 2026 on, commits written with
+  the agent say so in a `Co-Authored-By: Claude` line; earlier commits do not carry it.
+- **Trinalord777 supervised the work.** Trinalord777 chose what to build and in which order, guided the
+  implementation, beta-tested every build on a real Switch, reported the bugs and decided what went into each release.
+- **How bugs are debugged.** Bugs are measured on the console before anything is changed: a dev harness (dev builds
+  only, never in a release) lets the agent send inputs, read game memory and renderer counters, and take screenshots
+  on the Switch. For the hardest bugs, the agent ran deterministic multi-agent workflows: a fixed script in which one
+  agent investigates each hypothesis without touching the code, and a second one tries to refute it. For the textures
+  that went black after a long session, the workflows sorted the hypotheses and specified the memory counters to add;
+  on the console, those counters showed every texture upload failing past about 5,000 textures, which led to libnx's
+  8 MiB GPU memory area and the v1.1.2 fix. A small open decision model, Mapika's decider-2b (one choice per step, no text
+  generated), was also tried as a driver for long test sessions in the levels; it helped little, and no code in this
+  port comes from it.
+- **How it is checked**: builds with the pinned devkitA64 image, unit tests for the settings, play on real hardware,
+  and the logs of every session. Bugs can still slip through; reports are welcome as an
+  [issue](https://github.com/Trinalord777/DK64Recomp-NX/issues).
+- **The projects in "Standing on the shoulders of others"** are their authors' work. This section covers only this
+  fork's Switch layer.
+
 ## License
 
 This fork is GPL-3.0, like upstream. GLideN64 is licensed under GPL version 2 without the "or later" clause, which
@@ -374,7 +400,6 @@ respective owners. No game assets are included or distributed.
 
 ## Authors
 
-Trinalord777, on top of Donkey Kong 64: Recompiled by Rainchus and its contributors. Thanks to everyone behind the
-projects in "Standing on the shoulders of others".
-
-<sub>Ported with the help of Claude (Anthropic), tested on real hardware.</sub>
+Trinalord777 (supervision, direction and testing on hardware) and Claude Opus 5.5 (Anthropic), an AI coding agent
+(see "How it was made: AI use"), on top of Donkey Kong 64: Recompiled by Rainchus and its contributors. Thanks to
+everyone behind the projects in "Standing on the shoulders of others".
