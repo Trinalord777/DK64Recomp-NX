@@ -44,6 +44,9 @@ extern uint32_t dk64nx_swap_buffer_ring[];
 extern std::atomic<uint32_t> dk64nx_swap_count;
 // Screen updates the graphics thread skipped because a newer one was already queued, since the start (events.cpp).
 extern std::atomic<int> dk64nx_dropped_screen_updates;
+extern std::atomic<uint32_t> dk64nx_mem_textures, dk64nx_mem_texture_kib, dk64nx_mem_fb_textures,  // render_gliden64.cpp
+    dk64nx_mem_texture_misses,
+    dk64nx_mem_heap_kib, dk64nx_mem_used_mib, dk64nx_mem_total_mib, dk64nx_mem_gl_errors, dk64nx_mem_last_gl_error;
 extern "C" int dk64nx_interp_stats(char* out, int size);
 extern "C" void dk64nx_interp_request_projections();
 extern "C" int dk64nx_interp_projections(char* out, int size);
@@ -376,6 +379,18 @@ namespace {
                           static_cast<unsigned long long>(now_ms()));
             return out;
         }
+        if (command == "mem") {
+            // Sampled once a second on the gfx thread (render_gliden64.cpp).
+            char out[256];
+            std::snprintf(out, sizeof(out),
+                          "OK textures=%u texture_kib=%u created=%u fb_textures=%u heap_kib=%u used_mib=%u total_mib=%u "
+                          "gl_errors=%u last_gl_error=0x%x\n",
+                          dk64nx_mem_textures.load(), dk64nx_mem_texture_kib.load(), dk64nx_mem_texture_misses.load(),
+                          dk64nx_mem_fb_textures.load(),
+                          dk64nx_mem_heap_kib.load(), dk64nx_mem_used_mib.load(), dk64nx_mem_total_mib.load(),
+                          dk64nx_mem_gl_errors.load(), dk64nx_mem_last_gl_error.load());
+            return out;
+        }
         if (command == "cpu") return cpu_load();
         if (command == "timing") return timing_report();
         if (command == "mtx") {
@@ -565,13 +580,21 @@ extern "C" void dk64nx_remote_on_swap(int width, int height) {
     static auto read_pixels = reinterpret_cast<ReadPixels>(SDL_GL_GetProcAddress("glReadPixels"));
     constexpr unsigned READ_FRAMEBUFFER = 0x8CA8, READ_FRAMEBUFFER_BINDING = 0x8CAA, RGBA = 0x1908,
                        UNSIGNED_BYTE = 0x1401;
-    int previous = 0;
+    using BindBuffer = void (*)(unsigned, unsigned);
+    static auto bind_buffer = reinterpret_cast<BindBuffer>(SDL_GL_GetProcAddress("glBindBuffer"));
+    constexpr unsigned PIXEL_PACK_BUFFER = 0x88EB, PIXEL_PACK_BUFFER_BINDING = 0x88ED;
+    int previous = 0, pack_buffer = 0;
     get_integerv(READ_FRAMEBUFFER_BINDING, &previous);
+    // GLideN64's color buffer readback can leave a pixel pack buffer bound: glReadPixels would write into it and the
+    // shot would repeat an older image.
+    get_integerv(PIXEL_PACK_BUFFER_BINDING, &pack_buffer);
+    if (pack_buffer != 0) bind_buffer(PIXEL_PACK_BUFFER, 0);
     bind_framebuffer(READ_FRAMEBUFFER, 0);
     shot_pixels.resize(static_cast<size_t>(width) * height * 4);
     read_pixels(0, 0, width, height, RGBA, UNSIGNED_BYTE, shot_pixels.data());
     // GLideN64 caches its framebuffer bindings: leave the binding exactly as found.
     bind_framebuffer(READ_FRAMEBUFFER, static_cast<unsigned>(previous));
+    if (pack_buffer != 0) bind_buffer(PIXEL_PACK_BUFFER, static_cast<unsigned>(pack_buffer));
     shot_width = width;
     shot_height = height;
     shot_wanted = false;

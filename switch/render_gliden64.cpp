@@ -3,6 +3,7 @@
 // lib/RecompFrontend/recompui/src/renderer/rt64_render_context.cpp), so the memory layout
 // GLideN64 expects (32-bit words in host order) is already what the recompiled code writes.
 #include <atomic>
+#include <malloc.h>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -65,6 +66,20 @@ uint32_t dk64nx_dl_us_ring[512];      // its first pass, in microseconds
 uint32_t dk64nx_dl_us2_ring[512];     // its second pass, 0 without an in-between image
 std::atomic<uint32_t> dk64nx_dl_count{0};
 
+extern "C" void dk64nx_texture_counters(unsigned* textures, unsigned* texture_kib, unsigned* fb_textures,
+                                        unsigned* misses, unsigned* gl_error);  // gliden64_rt64ex.cpp
+// Memory counters, sampled on the gfx thread once a second: the dev harness's mem command reads them, and the log
+// gets them once a minute, so a long session's log shows what grows.
+std::atomic<uint32_t> dk64nx_mem_textures{0};
+std::atomic<uint32_t> dk64nx_mem_texture_kib{0};
+std::atomic<uint32_t> dk64nx_mem_fb_textures{0};
+std::atomic<uint32_t> dk64nx_mem_texture_misses{0};  // textures created since the start
+std::atomic<uint32_t> dk64nx_mem_heap_kib{0};     // newlib malloc in use
+std::atomic<uint32_t> dk64nx_mem_used_mib{0};     // the process, as the kernel counts it
+std::atomic<uint32_t> dk64nx_mem_total_mib{0};
+std::atomic<uint32_t> dk64nx_mem_gl_errors{0};    // samples that found a GL error
+std::atomic<uint32_t> dk64nx_mem_last_gl_error{0};
+
 namespace {
     // OSTask is copied where the RSP boot code leaves it, at the end of DMEM.
     constexpr uint32_t TASK_DMEM_OFFSET = 0xFC0;
@@ -89,6 +104,38 @@ namespace {
         if (accumulator < 30) return false;
         accumulator -= 30;
         return true;
+    }
+
+    void sample_memory() {
+        static uint64_t last = 0;
+        static uint64_t last_log = 0;
+        const uint64_t now = armGetSystemTick();
+        if (last != 0 && armTicksToNs(now - last) < 1000000000ull) return;
+        last = now;
+        unsigned textures = 0, texture_kib = 0, fb_textures = 0, misses = 0, gl_error = 0;
+        dk64nx_texture_counters(&textures, &texture_kib, &fb_textures, &misses, &gl_error);
+        const struct mallinfo heap = mallinfo();
+        uint64_t used = 0, total = 0;
+        svcGetInfo(&used, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0);
+        svcGetInfo(&total, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0);
+        dk64nx_mem_textures = textures;
+        dk64nx_mem_texture_kib = texture_kib;
+        dk64nx_mem_fb_textures = fb_textures;
+        dk64nx_mem_texture_misses = misses;
+        dk64nx_mem_heap_kib = static_cast<uint32_t>(heap.uordblks / 1024);
+        dk64nx_mem_used_mib = static_cast<uint32_t>(used >> 20);
+        dk64nx_mem_total_mib = static_cast<uint32_t>(total >> 20);
+        if (gl_error != 0) {
+            dk64nx_mem_gl_errors++;
+            dk64nx_mem_last_gl_error = gl_error;
+        }
+        if (last_log == 0 || armTicksToNs(now - last_log) >= 60000000000ull) {
+            last_log = now;
+            std::printf("[DK64NX] mem: textures %u (%u KiB, %u created), fb textures %u, heap %u MiB, process %u/%u MiB, "
+                        "gl errors %u (last 0x%x)\n", textures, texture_kib, misses, fb_textures,
+                        dk64nx_mem_heap_kib.load() >> 10, dk64nx_mem_used_mib.load(), dk64nx_mem_total_mib.load(),
+                        dk64nx_mem_gl_errors.load(), dk64nx_mem_last_gl_error.load());
+        }
     }
 
     // ultramodern signals SP/DP completion itself once send_dl returns.
@@ -229,6 +276,7 @@ namespace {
             }
             dk64nx_dl_us2_ring[dl_index % 512] = dk64nx_pass2_us;
             DK64NX_TIME(0, start);
+            sample_memory();
         }
 
         void send_dummy_workload(uint32_t) override {}

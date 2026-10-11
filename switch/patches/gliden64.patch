@@ -319,6 +319,62 @@ index bf3ba27..1ea2436 100644
  
  void RSP_Init();
  void RSP_ProcessDList();
+diff --git a/src/Textures.cpp b/src/Textures.cpp
+index 847289a..76c9250 100644
+--- a/src/Textures.cpp
++++ b/src/Textures.cpp
+@@ -802,9 +802,18 @@ void TextureCache::_checkHdTexLimit()
+ 	}
+ }
+ 
++size_t TextureCache::cachedTextureBytes() const
++{
++	size_t bytes = 0;
++	for (const CachedTexture & texture : m_textures)
++		bytes += texture.textureBytes;
++	return bytes;
++}
++
+ void TextureCache::_checkCacheSize()
+ {
+-	if (m_textures.size() >= m_maxCacheSize) {
++	// DK64NX: a loop, so a cap lowered at run time (gl texcap) takes effect at once.
++	while (!m_textures.empty() && m_textures.size() >= m_maxCacheSize) {
+ 		CachedTexture& clsTex = m_textures.back();
+ 		if (clsTex.bHDTexture)
+ 			m_hdTexCacheSize -= clsTex.textureBytes;
+diff --git a/src/Textures.h b/src/Textures.h
+index b129458..7173b59 100644
+--- a/src/Textures.h
++++ b/src/Textures.h
+@@ -70,6 +70,15 @@ struct TextureCache
+ 
+ 	static TextureCache & get();
+ 
++	// DK64NX: memory counters for the Switch port (switch/render_gliden64.cpp), and the cache cap the dev harness
++	// can lower (gl texcap).
++	size_t cachedTextureCount() const { return m_textures.size(); }
++	size_t frameBufferTextureCount() const { return m_fbTextures.size(); }
++	u32 missCount() const { return m_misses; }
++	size_t cachedTextureBytes() const;
++	size_t maxCacheSize() const { return m_maxCacheSize; }
++	void setMaxCacheSize(size_t _size) { m_maxCacheSize = _size; }
++
+ private:
+ 	TextureCache()
+ 		: m_pDummy(nullptr)
+@@ -113,9 +122,9 @@ private:
+ 	std::vector<u32> m_tempTextureHolder;
+ 
+ #ifdef VC
+-	const size_t m_maxCacheSize = 1500u;
++	size_t m_maxCacheSize = 1500u;
+ #else
+-	const size_t m_maxCacheSize = 8000u;
++	size_t m_maxCacheSize = 8000u;
+ #endif
+ 	u64 m_hdTexCacheSize = 0u;
+ };
 diff --git a/src/gDP.cpp b/src/gDP.cpp
 index a2805c4..44881c1 100644
 --- a/src/gDP.cpp

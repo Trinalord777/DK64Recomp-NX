@@ -25,6 +25,7 @@
 #include "FrameBuffer.h"
 #include "GBI.h"
 #include "N64.h"
+#include "Textures.h"
 #include "VI.h"
 #include "RSP.h"
 #include "gDP.h"
@@ -314,7 +315,26 @@ extern "C" void dk64nx_gliden64_save_shaders() {
     CombinerInfo::get().saveShadersStorageIfChanged();
 }
 
+// Texture cache counters for the memory sample in render_gliden64.cpp (gfx thread), and the last GL error: the
+// flag is sticky, so it reports any error since the previous call. ptrGetError, not glGetError: GLideN64's wrapper
+// returns GL_NO_ERROR without GL_DEBUG.
+extern "C" void dk64nx_texture_counters(unsigned* textures, unsigned* texture_kib, unsigned* fb_textures,
+                                        unsigned* misses, unsigned* gl_error) {
+    TextureCache& cache = textureCache();
+    *textures = static_cast<unsigned>(cache.cachedTextureCount());
+    *texture_kib = static_cast<unsigned>(cache.cachedTextureBytes() / 1024);
+    *fb_textures = static_cast<unsigned>(cache.frameBufferTextureCount());
+    *misses = cache.missCount();
+    *gl_error = static_cast<unsigned>(ptrGetError());
+}
+
 extern "C" int dk64nx_gliden64_set(const char* name, int value) {
+    if (strcmp(name, "texcap") == 0) {
+        // The texture cache's cap (GLideN64: 8000 textures); 0 restores it.
+        const int previous = static_cast<int>(textureCache().maxCacheSize());
+        textureCache().setMaxCacheSize(value > 0 ? static_cast<size_t>(value) : 8000u);
+        return previous;
+    }
     if (strcmp(name, "cutrot") == 0) {
         const int previous = static_cast<int>(cut_rotation * 100.0f);
         cut_rotation = value / 100.0f;

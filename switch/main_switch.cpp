@@ -42,6 +42,13 @@
 
 SDL_Window* dk64nx_window = nullptr;
 
+// nvdrv keeps the bookkeeping of every GPU allocation (mesa makes one nvMapCreate per texture) in the transfer memory
+// libnx hands it at startup: 8 MiB by default (a weak symbol). Measured on the console, uploads start failing with
+// GL_OUT_OF_MEMORY near 5,000 live textures; GLideN64 caches up to 8,000, so a long session ended in black and noisy
+// textures until a restart. 32 MiB holds about 20,000 allocations.
+extern "C" u32 __nx_nv_transfermem_size;
+u32 __nx_nv_transfermem_size = 32 * 1024 * 1024;
+
 void dk64nx_input_handle_event(const SDL_Event& event);
 void dk64nx_perf_start();
 void dk64nx_perf_update();
