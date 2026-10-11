@@ -47,7 +47,7 @@ performance overlay is on, top left.</sub></p>
 
 ### Copy the files
 
-Download `DK64Recomp-NX-v1.1.1.zip` from [Releases](https://github.com/Trinalord777/DK64Recomp-NX/releases) and
+Download `DK64Recomp-NX-v1.1.2.zip` from [Releases](https://github.com/Trinalord777/DK64Recomp-NX/releases) and
 extract it to the root of the SD card, then add your ROM next to the `.nro` (its file name does not matter). The SD
 card must end up like this:
 
@@ -125,6 +125,8 @@ input viewer bottom right.</sub></p>
 ### Picture
 
 - **Resolution:** 3x (960x720, the default, fills the height of the 720p screen) or 2x (640x480, lighter).
+  4x (1080p, experimental) draws 1280x960 into a 1920x1080 picture for a docked console; it costs more GPU time,
+  and was measured at 1428 MHz only.
 - **Aspect ratio:** 16:9 with the HUD at the screen edges (the default), or the original 4:3.
 - **Texture LOD:** off by default. GLideN64's level of detail emulation tints the Kongs' eye whites pink and blurs
   their pupils, as reported in
@@ -208,7 +210,7 @@ cheats left on are remembered in `cheats_enabled.txt`.
 ### Dev Tools
 
 - **Game:** map, Kong and position, a map and position overlay, the clocks.
-- **Warp:** to DK Isles or any level. A warp can take you where the story has not gone yet: try warps on a spare
+- **Warp:** to DK Isles or any level, from a loaded file (not from the title screen or the intro). A warp can take you where the story has not gone yet: try warps on a spare
   save file. Warping into Hideout Helm starts its countdown, which keeps running after you leave and ends in a game
   over.
 - **Inventory:** coins, ammo, oranges, crystal coconuts, film, melons, health.
@@ -233,6 +235,18 @@ Known issues:
 - **About 10 s of black screen at the start** before the Nintendo logo (12.0 s at 1020 MHz, 9.7 s at 1428 MHz).
 
 ## Changelog
+
+### 2026-10-11: v1.1.2
+
+- **Textures no longer go black after a long session.** The GPU service (nvdrv) keeps one record per texture in a
+  memory area libnx sizes at 8 MiB; GLideN64 keeps up to 8,000 textures, and past about 5,000 every new texture
+  failed (GL_OUT_OF_MEMORY): black or noisy textures until the game was restarted. The area is now 32 MiB. A tour
+  of seven levels with the cache full (8,000 textures, more than 10,000 created) gave no error.
+- **Smoother 60 fps Interpolated while running:** a wait for the screen's refresh was counted as drawing time, so
+  in-between images were dropped for nothing. In the same 60 s run in Angry Aztec at 50 fps, 66% of the frames got
+  their in-between image instead of 54%, and 9 frames were held instead of 198.
+- **Resolution 4x (1080p, experimental)**, for a docked console.
+- **Dev Tools > Warp** now waits for a loaded file: a warp from the intro left the main menu without input.
 
 ### 2026-10-11: v1.1.1
 
